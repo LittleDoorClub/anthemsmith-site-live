@@ -89,35 +89,43 @@ function requestData(){
  values.files=selectedIntakeFiles().map((f,i)=>({path:'photos/'+String(i+1).padStart(2,'0')+'-'+f.name.replace(/[^a-zA-Z0-9._-]/g,'_'),original_name:f.name,type:f.type,size:f.size}));
  return values;
 }
-function requestText(data){
- const labels={request_id:'Request',email:'Delivery email',intake_lane:'Source',names:'About',category:'Song type',mood:'Mood',instagram1:'Instagram',instagram2:'Second Instagram',referenceUrl:'Sound reference',artist:'Reference artist',song:'Reference song',genre:'Genre',voice:'Voice',details:'Memories and inside jokes',laneDetails0:'Post captions',laneDetails1:'Screenshot captions',laneDetails2:'Photo captions'};
- return 'ANTHEMSMITH SONG REQUEST\nNot yet submitted or paid.\n\n'+Object.entries(labels).filter(([k])=>data[k]).map(([k,label])=>label+': '+data[k]).join('\n')+'\n\nFiles: '+(data.files.map(f=>f.original_name).join(', ')||'None')+'\n\nPlease confirm the $5 price and delivery time before payment.\n';
+function requestText(data){return JSON.stringify(data,null,1)}
+// ===== INSTANT FLOW: IG link -> Stripe $5 -> repo_dispatch -> forge -> play =====
+const GH_OWNER='LittleDoorClub',GH_REPO='anthemsmith-site-live';
+function orderStatusURL(id){return 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'.json'}
+function songURL(id){return 'assets/audio/'+id+'.mp3'}
+async function fireOrder(data){
+ const id=data.request_id;
+ const disp=await fetch('https://api.github.com/repos/'+GH_OWNER+'/'+GH_REPO+'/dispatches',{method:'POST',headers:{'Accept':'application/vnd.github+json','Content-Type':'application/json'},
+  body:JSON.stringify({event_type:'anthemsmith-order',client_payload:{order_id:id,ig_url:data.instagram1||'',category:data.category||'My Story',mood:data.mood||'',voice:data.voice||'Surprise me',details:data.details||'',email:data.email||''}})});
+ if(!disp.ok&&disp.status!==204)throw new Error('dispatch '+disp.status);
+ return id;
 }
-$('#songForm').onsubmit=e=>{
- e.preventDefault();const lane=activeLane();
- if(lane!=='link'&&!selectedIntakeFiles().length){const input=document.getElementById(fileConfig[lane].input);input.setCustomValidity('Choose '+(lane==='photos'?'at least one photo.':'a grid screenshot.'));input.reportValidity();return}
- if(!e.target.reportValidity())return;
- const data=requestData(),text=requestText(data),brief=$('#brief');brief.replaceChildren();
- const h=document.createElement('h3');h.textContent='Your request is ready to send';
- const note=document.createElement('p');note.textContent='Nothing has been sent or charged. Download your request, then attach it to your email. We’ll confirm the details and delivery time before payment.';
- const pre=document.createElement('pre');pre.className='request-summary';pre.style.whiteSpace='pre-wrap';pre.style.fontFamily='inherit';pre.textContent=text;
- const actions=document.createElement('div');actions.className='request-actions';
- const download=document.createElement('button');download.type='button';download.className='primary';download.textContent='1. Download request + photos';
- const email=document.createElement('a');email.className='instagram-button';email.textContent='2. Open email';email.href='mailto:gabrieljtao@gmail.com?subject='+encodeURIComponent('AnthemSmith '+data.request_id)+'&body='+encodeURIComponent('Hi AnthemSmith,\n\nPlease review my song request. I will attach the downloaded ZIP.\n\n'+text);
- const status=document.createElement('p');status.id='requestStatus';status.className='small';status.setAttribute('role','status');
- const files=selectedIntakeFiles().slice();
- download.onclick=async()=>{
-  download.disabled=true;status.textContent='Preparing your download…';
-  try{
-   const entries=[{name:'request.txt',data:new TextEncoder().encode(text)},{name:'request.json',data:new TextEncoder().encode(JSON.stringify(data,null,2))}];
-   for(let i=0;i<files.length;i++)entries.push({name:data.files[i].path,data:new Uint8Array(await files[i].arrayBuffer())});
-   const blob=AnthemZip.create(entries),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=data.request_id+'.zip';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
-   status.textContent='Download started. Attach the ZIP to your email. If it is too large for email, send a private file-sharing link instead. Nothing was submitted by this page.';
-  }catch{status.textContent='The download could not be prepared. Try fewer or smaller photos.'}finally{download.disabled=false}
- };
- const back=document.createElement('button');back.type='button';back.className='text-button';back.textContent='Edit request';back.onclick=()=>{brief.hidden=true;e.target.hidden=false};
- actions.append(download,email);brief.append(h,note,pre,actions,status,back);e.target.hidden=true;brief.hidden=false;brief.scrollIntoView({behavior:'smooth',block:'start'});
-};
-$('#demo').addEventListener('close',()=>$('#demo').querySelectorAll('audio').forEach(a=>a.pause()));
-document.addEventListener('error',e=>{if(e.target.tagName==='AUDIO'){const audio=e.target;let note=audio.nextElementSibling;if(!note||!note.classList.contains('audio-error')){note=document.createElement('p');note.className='small audio-error';note.setAttribute('role','status');note.textContent='This sample could not load. Please try again shortly.';audio.after(note)}}},true);
+function watchOrder(id,box,tries){
+ box.innerHTML='<p class="small">Forging your song... this takes 3-5 minutes. Keep this tab open.</p><div class="progress"><div class="progress-bar" style="width:5%"></div></div>';
+ let n=0;const timer=setInterval(async()=>{
+  n++;const pct=Math.min(92,5+n*3);const bar=box.querySelector('.progress-bar');if(bar)bar.style.width=pct+'%';
+  try{const r=await fetch(orderStatusURL(id)+'?t='+Date.now());if(r.ok){clearInterval(timer);box.innerHTML='<h3>Your song is ready.</h3><audio controls autoplay src="'+songURL(id)+'"></audio><p class="small"><a class="instagram-button" download href="'+songURL(id)+'">Download your song</a> &nbsp; <a class="text-button" href="assets/audio/'+id+'-full.mp3" download>Full version</a></p>';}
+   else if(n>(tries||90)){clearInterval(timer);box.innerHTML='<p class="small">Still forging — check back in a few minutes at this page, or contact us with your order ID.</p>';}
+  }catch(e){}
+ },4000);
+}
+async function submitInstant(){
+ const values=Object.fromEntries(Array.from(new FormData($('#songForm'))).filter(([,v])=>typeof v==='string'));
+ if(!values.instagram1){$('#brief').hidden=false;$('#brief').innerHTML='<p class="small">Paste your Instagram link first — that is the one thing we need.</p>';return}
+ if(!values.email){$('#brief').hidden=false;$('#brief').innerHTML='<p class="small">Add your delivery email so we know where to send status.</p>';return}
+ values.request_id='AS-'+Date.now().toString(36).toUpperCase();values.status='pending_payment';values.quoted_price=5;
+ sessionStorage.setItem('anthemsmith_order',JSON.stringify(values));
+ // Payment first (Stripe live link), order fires on return
+ window.location.href='https://buy.stripe.com/6oU5kE4LT9Md16lbzu14402';
+}
+function resumeAfterPayment(){
+ const raw=sessionStorage.getItem('anthemsmith_order');if(!raw)return false;
+ const data=JSON.parse(raw);sessionStorage.removeItem('anthemsmith_order');
+ const box=$('#brief');box.hidden=false;box.innerHTML='<p class="small">Payment received. Firing the forge...</p>';
+ fireOrder(data).then(()=>watchOrder(data.request_id,box)).catch(e=>{box.innerHTML='<p class="small">Order failed to start: '+e.message+' — your payment is safe, contact us with ID '+data.request_id+'.</p>'});
+ return true;
+}
+window.addEventListener('load',()=>{if(new URLSearchParams(location.search).get('paid')==='1')resumeAfterPayment()});
+
 pickLane(0);

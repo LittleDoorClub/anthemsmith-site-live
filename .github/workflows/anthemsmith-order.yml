@@ -1,0 +1,42 @@
+name: anthemsmith-order
+on:
+  repository_dispatch:
+    types: [anthemsmith-order]
+
+permissions:
+  contents: write
+
+jobs:
+  forge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install audio tools
+        run: |
+          pip install librosa numpy --quiet
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
+      - name: "Forge song: scrape, measure, lyrics, Suno, QC"
+        env:
+          MUAPI_KEY: ${{ secrets.MUAPI_KEY }}
+          ORDER_ID: ${{ github.event.client_payload.order_id }}
+          IG_URL: ${{ github.event.client_payload.ig_url }}
+          CATEGORY: ${{ github.event.client_payload.category }}
+          MOOD: ${{ github.event.client_payload.mood }}
+          VOICE: ${{ github.event.client_payload.voice }}
+          DETAILS: ${{ github.event.client_payload.details }}
+        run: python scripts/forge_order.py
+
+      - name: Commit the delivered song
+        run: |
+          git config user.name "anthemsmith-forge"
+          git config user.email "forge@anthemsmith.com"
+          git add songs/
+          git commit -m "song ${{ github.event.client_payload.order_id }}" || echo "nothing to commit"
+          git push
