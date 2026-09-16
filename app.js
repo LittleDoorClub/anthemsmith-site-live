@@ -1,4 +1,4 @@
-const stories=[{name:'My Story',tag:'A LIFE WORTH SINGING',title:'Every chapter counts.',desc:'Your roots, your comeback, your next great chapter.',image:0,moods:['Life journey','Hometown roots','Comeback','Celebration','Surprise me'],caption:'Sample caption: “First studio. Same dream I had at sixteen.”',lyric:'Sixteen-year-old dreams in a room of my own, / Every color on these walls says I made it home.'},{name:'Funny',tag:'A LITTLE LOVE. A LITTLE ROAST.',title:'The legend lives on.',desc:'That one friend. That one story. That unforgettable chorus.',image:1,moods:['Playful roast','Inside jokes','Birthday chaos','Surprise me'],caption:'Sample caption: “The cake collapsed. Our confidence did not.”',lyric:'You called it a masterpiece, we called the floor, / Best worst birthday we keep coming back for.'},{name:'Couples',tag:'YOUR VERY OWN LOVE SONG',title:'Our kind of forever.',desc:'From the first hello to the kitchen slow dance.',image:2,moods:['In love','Crush','Missing you','Breakup','Anniversary','Surprise me'],caption:'Sample caption: “No reservations. Just our kitchen and this song.”',lyric:'We never needed chandeliers to make the evening shine, / Just your hand in mine and a little borrowed time.'},{name:'Friendship',tag:'FOR YOUR FAVORITE PEOPLE',title:'Wrong turn. Right people.',desc:'The road trips, the laughter, the partners in crime.',image:3,moods:['Best friends','Partners in crime','Funny','Flirty','Falling out','Surprise me'],caption:'Sample caption: “Missed the exit. Found our favorite day.”',lyric:'We lost the map but found our way, / You’re the people I would choose on any day.'}];
+const stories=[{name:'My Story',tag:'A LIFE WORTH SINGING',title:'Every chapter counts.',desc:'Your roots, your comeback, your next great chapter.',image:0,moods:['Life journey','Hometown roots','Comeback','Celebration','Surprise me'],caption:'Sample caption: “First studio. Same dream I had at sixteen.”',lyric:'Sixteen-year-old dreams in a room of my own, / Every color on these walls says I made it home.'},{name:'Funny',tag:'A LITTLE LOVE. A LITTLE ROAST.',title:'The legend lives on.',desc:'That one friend. That one story. That unforgettable chorus.',image:1,moods:['Playful roast','Inside jokes','Birthday chaos','Surprise me'],caption:'Sample caption: “The cake collapsed. Our confidence did not.”',lyric:'You called it a masterpiece, we called the floor, / Best worst birthday we keep coming back for.'},{name:'Couples',tag:'YOUR VERY OWN LOVE SONG',title:'Our kind of forever.',desc:'From the first hello to the kitchen slow dance.',image:2,moods:['In love','Crush','Missing you','Breakup','Anniversary','Surprise me'],caption:'Sample caption: “No reservations. Just our kitchen and this song.”',lyric:'Two washes, extra noodles, one sock gone astray, / I’d choose you in this laundromat on any given day.'},{name:'Friendship',tag:'FOR YOUR FAVORITE PEOPLE',title:'Wrong turn. Right people.',desc:'The road trips, the laughter, the partners in crime.',image:3,moods:['Best friends','Partners in crime','Funny','Flirty','Falling out','Surprise me'],caption:'Sample caption: “Missed the exit. Found our favorite day.”',lyric:'We lost the map but found our way, / You’re the people I would choose on any day.'}];
 const rawStories=[
 {title:'Still here. Still building.',tag:'MY STORY / THE UNEDITED VERSION',desc:'The late shifts, second chances, and things you built yourself.',caption:'Fictional caption: “45. First shop with my name on the door.”',comment:'Fictional comment: “Still wearing the boots from your first job.”',lyric:'Same old boots on a brand-new floor, / Forty-five years brought me to this door.'},
 {title:'He said he’d help.',tag:'FUNNY / A REGULAR SATURDAY',desc:'Ten minutes into gardening. He’s supervising.',caption:'Fictional caption: “He said he’d help.”',comment:'Fictional comment: “Hasn’t moved a single plant.”',lyric:'You came to move the garden, took the wheelbarrow seat, / Now I’m doing all the digging while you put up your feet.'},
@@ -95,11 +95,12 @@ const GH_OWNER='LittleDoorClub',GH_REPO='anthemsmith-site-live';
 function orderStatusURL(id){return 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'.json'}
 function songURL(id){return 'assets/audio/'+id+'.mp3'}
 async function fireOrder(data){
- const id=data.request_id;
- const disp=await fetch('https://api.github.com/repos/'+GH_OWNER+'/'+GH_REPO+'/dispatches',{method:'POST',headers:{'Accept':'application/vnd.github+json','Content-Type':'application/json'},
-  body:JSON.stringify({event_type:'anthemsmith-order',client_payload:{order_id:id,ig_url:data.instagram1||'',category:data.category||'My Story',mood:data.mood||'',voice:data.voice||'Surprise me',details:data.details||'',email:data.email||''}})});
- if(!disp.ok&&disp.status!==204)throw new Error('dispatch '+disp.status);
- return id;
+ // Relay via ntfy (public topic, JSON body). The forge poller picks it up and
+ // fires the GitHub dispatch with the repo secret server-side.
+ const ord={order_id:data.request_id,ig_url:data.instagram1||'',category:data.category||'My Story',mood:data.mood||'',voice:data.voice||'Surprise me',details:data.details||'',email:data.email||''};
+ const r=await fetch('https://ntfy.sh/as-anthemsmith-orders-v1',{method:'POST',headers:{'Content-Type':'application/json','Title':'anthemsmith-order','X-Order-Id':data.request_id,'Tags':'anvil'},body:JSON.stringify(ord)});
+ if(!r.ok)throw new Error('relay '+r.status);
+ return data.request_id;
 }
 function watchOrder(id,box,tries){
  box.innerHTML='<p class="small">Forging your song... this takes 3-5 minutes. Keep this tab open.</p><div class="progress"><div class="progress-bar" style="width:5%"></div></div>';
@@ -126,6 +127,15 @@ function resumeAfterPayment(){
  fireOrder(data).then(()=>watchOrder(data.request_id,box)).catch(e=>{box.innerHTML='<p class="small">Order failed to start: '+e.message+' — your payment is safe, contact us with ID '+data.request_id+'.</p>'});
  return true;
 }
-window.addEventListener('load',()=>{if(new URLSearchParams(location.search).get('paid')==='1')resumeAfterPayment()});
+window.addEventListener('load',()=>{
+ const resume=()=>resumeAfterPayment();
+ if(new URLSearchParams(location.search).get('paid')==='1'){resume();}
+ else if(sessionStorage.getItem('anthemsmith_order')){
+  const box=$('#brief');if(!box)return;box.hidden=false;
+  box.innerHTML='<p class="small">Welcome back! Your song request is saved — <a href="#" id="resumeOrder">finish my order</a>.</p>';
+  const a=document.getElementById('resumeOrder');
+  if(a)a.onclick=(e)=>{e.preventDefault();resume();};
+ }
+});
 
 pickLane(0);
