@@ -106,7 +106,7 @@ function watchOrder(id,box,tries){
  box.innerHTML='<p class="small">Forging your song... this takes 3-5 minutes. Keep this tab open.</p><div class="progress"><div class="progress-bar" style="width:5%"></div></div>';
  let n=0;const timer=setInterval(async()=>{
   n++;const pct=Math.min(92,5+n*3);const bar=box.querySelector('.progress-bar');if(bar)bar.style.width=pct+'%';
-  try{const r=await fetch(orderStatusURL(id)+'?t='+Date.now());if(r.ok){clearInterval(timer);box.innerHTML='<h3>Your song is ready.</h3><audio controls autoplay src="'+songURL(id)+'"></audio><p class="small"><a class="instagram-button" download href="'+songURL(id)+'">Download your song</a> &nbsp; <a class="text-button" href="https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'-full.mp3" download>Full version</a></p>';}
+  try{const r=await fetch(orderStatusURL(id)+'?t='+Date.now());if(r.ok){clearInterval(timer);box.innerHTML='<h3>Your song is ready. 🎉</h3><audio controls autoplay src="'+songURL(id)+'"></audio><p class="small">Love it? Add another song for <b>$3</b> — <a href="https://buy.stripe.com/00w9AUbah8I9cP38ni14403" target="_blank" rel="noopener">grab the $3 follow-up</a>, come back, and hit the button again with new photos.</p><p class="small"><a class="instagram-button" download href="'+songURL(id)+'">Download your song</a> &nbsp; <a class="text-button" href="https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'-full.mp3" download>Full version</a></p>';}
    else if(n>(tries||90)){clearInterval(timer);box.innerHTML='<p class="small">Still forging — check back in a few minutes at this page, or contact us with your order ID.</p>';}
   }catch(e){}
  },4000);
@@ -132,7 +132,7 @@ function payChoicePanel(values){
 async function submitInstant(){
  const values=Object.fromEntries(Array.from(new FormData($('#songForm'))).filter(([,v])=>typeof v==='string'));
  if(!values.instagram1){$('#brief').hidden=false;$('#brief').innerHTML='<p class="small">Paste your Instagram link first — that is the one thing we need.</p>';return}
- if(!values.email){$('#brief').hidden=false;$('#brief').innerHTML='<p class="small">Add your delivery email so we can attach your order.</p>';return}
+ // email dropped (Gabe 09-16): delivery is on-page download, no inbox needed
  payChoicePanel(values);
 }
 function resumeAfterPayment(){
