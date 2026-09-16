@@ -116,8 +116,8 @@ function payChoicePanel(values){
  box.innerHTML='<span class="eyebrow">LAST STEP</span><h2>Lock in your song — $5</h2>'
  +'<div class="pay-grid">'
  +'<div class="pay-card"><b>Pay with Card</b><p class="small">Apple Pay · Link · instant</p><a class="pay-link" href="https://buy.stripe.com/6oU5kE4LT9Md16lbzu14402" target="_blank" rel="noopener">Pay with Card</a></div>'
- +'<div class="pay-card"><b>Pay with Cash App</b><img class="pay-qr" src="assets/cashapp_qr_gabe_20260915.jpg" alt="Cash App QR" width="220" height="220"><a class="pay-link" href="https://cash.app/$Gabrielmoneys" target="_blank" rel="noopener">Pay with Cash App</a></div>'
- +'<div class="pay-card"><b>Pay with Venmo</b><img class="pay-qr" src="assets/venmo_qr_gabe_20260915.jpg" alt="Venmo QR" width="220" height="220"><a class="pay-link" href="https://venmo.com/Gabriel-Tao" target="_blank" rel="noopener">Pay with Venmo</a></div>'
+ +'<div class="pay-card"><b>Pay with Cash App</b><img class="pay-qr" src="assets/cashapp_qr_clean.jpg" alt="Cash App QR" width="220" height="220"><a class="pay-link" href="https://cash.app/$Gabrielmoneys" target="_blank" rel="noopener">Pay with Cash App</a></div>'
+ +'<div class="pay-card"><b>Pay with Venmo</b><img class="pay-qr" src="assets/venmo_qr_clean.jpg" alt="Venmo QR" width="220" height="220"><a class="pay-link" href="https://venmo.com/Gabriel-Tao" target="_blank" rel="noopener">Pay with Venmo</a></div>'
  +'</div>'
  +'<button class="primary" id="paidDone">I\'ve paid — forge my song</button>'
  +'<p class="small">Paying opens a secure tab — come back here and your song plays on this page when it\'s ready.</p>';
