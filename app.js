@@ -93,7 +93,7 @@ function requestText(data){return JSON.stringify(data,null,1)}
 // ===== INSTANT FLOW: IG link -> Stripe $5 -> repo_dispatch -> forge -> play =====
 const GH_OWNER='LittleDoorClub',GH_REPO='anthemsmith-site-live';
 function orderStatusURL(id){return 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'.json'}
-function songURL(id){return 'assets/audio/'+id+'.mp3'}
+function songURL(id){return 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'.mp3'}
 async function fireOrder(data){
  // Relay via ntfy (public topic, JSON body). The forge poller picks it up and
  // fires the GitHub dispatch with the repo secret server-side.
@@ -106,7 +106,7 @@ function watchOrder(id,box,tries){
  box.innerHTML='<p class="small">Forging your song... this takes 3-5 minutes. Keep this tab open.</p><div class="progress"><div class="progress-bar" style="width:5%"></div></div>';
  let n=0;const timer=setInterval(async()=>{
   n++;const pct=Math.min(92,5+n*3);const bar=box.querySelector('.progress-bar');if(bar)bar.style.width=pct+'%';
-  try{const r=await fetch(orderStatusURL(id)+'?t='+Date.now());if(r.ok){clearInterval(timer);box.innerHTML='<h3>Your song is ready.</h3><audio controls autoplay src="'+songURL(id)+'"></audio><p class="small"><a class="instagram-button" download href="'+songURL(id)+'">Download your song</a> &nbsp; <a class="text-button" href="assets/audio/'+id+'-full.mp3" download>Full version</a></p>';}
+  try{const r=await fetch(orderStatusURL(id)+'?t='+Date.now());if(r.ok){clearInterval(timer);box.innerHTML='<h3>Your song is ready.</h3><audio controls autoplay src="'+songURL(id)+'"></audio><p class="small"><a class="instagram-button" download href="'+songURL(id)+'">Download your song</a> &nbsp; <a class="text-button" href="https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'-full.mp3" download>Full version</a></p>';}
    else if(n>(tries||90)){clearInterval(timer);box.innerHTML='<p class="small">Still forging — check back in a few minutes at this page, or contact us with your order ID.</p>';}
   }catch(e){}
  },4000);
