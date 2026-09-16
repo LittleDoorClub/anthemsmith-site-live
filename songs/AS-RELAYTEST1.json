@@ -1,0 +1,14 @@
+{
+ "order_id": "AS-RELAYTEST1",
+ "status": "delivered",
+ "handle": "anthemsmith",
+ "category": "My Story",
+ "duration_full": 204.792,
+ "model": "V6",
+ "heart_anchor": "End-to-end relay test order. Brand voice, upbeat, clean.",
+ "sources": {
+  "bio": false,
+  "captions_used": 0,
+  "details": true
+ }
+}
