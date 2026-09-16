@@ -97,7 +97,7 @@ function songURL(id){return 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH
 async function fireOrder(data){
  // Relay via ntfy (public topic, JSON body). The forge poller picks it up and
  // fires the GitHub dispatch with the repo secret server-side.
- const ord={order_id:data.request_id,ig_url:data.instagram1||'',category:data.category||'My Story',mood:data.mood||'',voice:data.voice||'Surprise me',details:data.details||'',email:data.email||''};
+ const ord={order_id:data.request_id,ig_url:data.instagram1||'',category:data.category||'My Story',mood:data.mood||'',voice:data.voice||'Surprise me',details:data.details||'',email:data.email||'',pay_method:data.pay_method||'card'};
  const r=await fetch('https://ntfy.sh/as-anthemsmith-orders-v1',{method:'POST',headers:{'Content-Type':'application/json','Title':'anthemsmith-order','X-Order-Id':data.request_id,'Tags':'anvil'},body:JSON.stringify(ord)});
  if(!r.ok)throw new Error('relay '+r.status);
  return data.request_id;
@@ -115,14 +115,36 @@ async function submitInstant(){
  const values=Object.fromEntries(Array.from(new FormData($('#songForm'))).filter(([,v])=>typeof v==='string'));
  if(!values.instagram1){$('#brief').hidden=false;$('#brief').innerHTML='<p class="small">Paste your Instagram link first — that is the one thing we need.</p>';return}
  if(!values.email){$('#brief').hidden=false;$('#brief').innerHTML='<p class="small">Add your delivery email so we know where to send status.</p>';return}
- values.request_id='AS-'+Date.now().toString(36).toUpperCase();values.status='pending_payment';values.quoted_price=5;
+ values.request_id='AS-'+Date.now().toString(36).toUpperCase();values.status='pending_payment';values.quoted_price=5;values.pay_method=values.pay_method||'card';
  sessionStorage.setItem('anthemsmith_order',JSON.stringify(values));
+ if(values.pay_method==='venmo_cashapp'){revealManualPay(values);return}
  // Payment first (Stripe live link), order fires on return
  window.location.href='https://buy.stripe.com/6oU5kE4LT9Md16lbzu14402';
 }
+function revealManualPay(values){
+ const pay=$('#payment');if(!pay){window.location.href='https://buy.stripe.com/6oU5kE4LT9Md16lbzu14402';return}
+ const box=$('#brief');box.hidden=true;
+ let note=pay.querySelector('.pay-order-note');
+ if(!note){note=document.createElement('p');note.className='small pay-order-note';pay.querySelector('.pay-grid').after(note)}
+ note.innerHTML='Your order ID is <b>'+values.request_id+'</b> — include it in the payment note so we match it fast. Pay $5 via the Cash App or Venmo card, then tap the button below.';
+ let btn=pay.querySelector('.pay-confirm');
+ if(!btn){btn=document.createElement('button');btn.className='primary pay-confirm';btn.type='button';note.after(btn);btn.addEventListener('click',confirmManualPay)}
+ btn.textContent='I paid — forge my song';
+ pay.hidden=false;pay.scrollIntoView({behavior:'smooth',block:'start'});
+}
+function confirmManualPay(){
+ const raw=sessionStorage.getItem('anthemsmith_order');if(!raw)return;
+ const data=JSON.parse(raw);data.status='manual_paid';data.pay_method=data.pay_method||'venmo_cashapp';
+ sessionStorage.setItem('anthemsmith_order',JSON.stringify(data));
+ const pay=$('#payment');if(pay)pay.hidden=true;
+ const box=$('#brief');box.hidden=false;box.innerHTML='<p class="small">Payment noted. Firing the forge...</p>';
+ fireOrder(data).then(()=>{sessionStorage.removeItem('anthemsmith_order');watchOrder(data.request_id,box)}).catch(e=>{box.innerHTML='<p class="small">Order failed to start: '+e.message+' — your payment is safe, contact us with ID '+data.request_id+'.</p>'});
+}
 function resumeAfterPayment(){
  const raw=sessionStorage.getItem('anthemsmith_order');if(!raw)return false;
- const data=JSON.parse(raw);sessionStorage.removeItem('anthemsmith_order');
+ const data=JSON.parse(raw);
+ if(data.pay_method==='venmo_cashapp'&&data.status!=='manual_paid'){revealManualPay(data);return true}
+ sessionStorage.removeItem('anthemsmith_order');
  const box=$('#brief');box.hidden=false;box.innerHTML='<p class="small">Payment received. Firing the forge...</p>';
  fireOrder(data).then(()=>watchOrder(data.request_id,box)).catch(e=>{box.innerHTML='<p class="small">Order failed to start: '+e.message+' — your payment is safe, contact us with ID '+data.request_id+'.</p>'});
  return true;
