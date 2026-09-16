@@ -8,7 +8,7 @@ const rawStories=[
 
 stories.forEach((s,i)=>Object.assign(s,rawStories[i]));
 // Published demo selections. Keep reference masters unchanged.
-const samples=[{genre:'Boom-bap Hip-hop',voice:'Female',src:'assets/audio/mystory-hook-30.mp3'},{genre:'Pop-punk',voice:'Male',src:'assets/audio/funny-hook-30.mp3'},{genre:'Deep House',voice:'Female',src:'assets/audio/couples-hook-30.mp3'},{genre:'Hip-hop',voice:'Male',src:'assets/audio/friendship-hook-30.mp3'}];
+const samples=[{genre:'Boom-bap Hip-hop',voice:'Female',src:'assets/audio/mystory-hook-30.mp3'},{genre:'Pop-punk',voice:'Male',src:'assets/audio/funny-hook-30.mp3'},{genre:'Art-pop / dream synth',voice:'Female',src:'assets/audio/couples-hook-30.mp3'},{genre:'Hip-hop',voice:'Male',src:'assets/audio/friendship-hook-30.mp3'}];
 function sample(i){const x=samples[i];return `<div class="song-sample"><span class="sample-label">${x.genre} · ${x.voice} vocals</span><p class="sample-lyric">${stories[i].lyric.replace(' / ','<br>')}</p>${x.src?`<audio controls preload="none" aria-label="30-second ${stories[i].name} song sample" src="${x.src}"></audio>`:`<button class="sample-pending" disabled aria-label="30-second sample not recorded yet">▶ &nbsp; 30-second sample · Coming soon</button>`}</div>`}
 let current=0,activeStory=1;
 const $=s=>document.querySelector(s);
