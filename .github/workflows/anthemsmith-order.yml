@@ -2,12 +2,114 @@ name: anthemsmith-order
 on:
   repository_dispatch:
     types: [anthemsmith-order]
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
+  relay-poll:
+    # Pulls paid-order JSONs from the public ntfy relay and fires the
+    # authenticated repository_dispatch server-side. Claim-file lock in the
+    # repo prevents double-dispatch across pollers (409 race = lock held).
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Relay poll → claim → repository_dispatch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO_URL: https://api.github.com/repos/LittleDoorClub/anthemsmith-site-live
+          RAW_URL: https://raw.githubusercontent.com/LittleDoorClub/anthemsmith-site-live/main
+        run: |
+          python3 - <<'PY'
+          import json, os, time, urllib.request
+          REPO = "LittleDoorClub/anthemsmith-site-live"
+          TOK = os.environ["GH_TOKEN"]
+          GH = os.environ["GH_REPO_URL"].rstrip("/")
+          RAW = os.environ["RAW_URL"].rstrip("/")
+          H = {"Accept": "application/vnd.github+json",
+               "Authorization": "Bearer " + TOK,
+               "Content-Type": "application/json"}
+
+          def gh_json(method, url, body=None):
+              data = json.dumps(body).encode() if body is not None else None
+              req = urllib.request.Request(url, data=data, method=method, headers=H)
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as r:
+                      return r.status, json.loads(r.read().decode() or "{}")
+              except urllib.error.HTTPError as e:
+                  return e.code, json.loads(e.read().decode() or "{}")
+
+          def file_sha(path):
+              st, d = gh_json("GET", f"{GH}/contents/{path}")
+              return (d.get("sha") if st == 200 else None)
+
+          def claim_order(oid):
+              """Returns True if we own the order (claim written). 409-style race
+              is resolved by the sha precondition: only one writer wins."""
+              delivered = file_sha(f"songs/{oid}.json")
+              if delivered:
+                  print("skip delivered", oid); return False
+              csha = file_sha(f"songs/{oid}.claim.json")
+              if csha:
+                  st, d = gh_json("GET", f"{GH}/contents/songs/{oid}.claim.json")
+                  if st == 200:
+                      import base64
+                      ts = json.loads(base64.b64decode(d["content"]).decode()).get("ts", 0)
+                      if time.time() - float(ts) < 25 * 60:
+                          print("skip in-flight", oid); return False
+                      print("stale claim, retaking", oid)
+              body = {"message": f"claim {oid}", "content":
+                      __import__("base64").b64encode(json.dumps(
+                          {"ts": time.time(), "by": "relay-poll"}).encode()).decode()}
+              body = body | ({"sha": csha} if csha else {})
+              st, d = gh_json("PUT", f"{GH}/contents/songs/{oid}.claim.json", body)
+              if st in (200, 201):
+                  return True
+              print("claim race lost", oid, st); return False
+
+          seen = set()
+          for _ in range(3):
+              try:
+                  with urllib.request.urlopen(
+                      "https://ntfy.sh/as-anthemsmith-orders-v1/json?poll=1&since=12m",
+                      timeout=30) as r:
+                      for ln in r.read().decode().splitlines():
+                          try:
+                              e = json.loads(ln)
+                          except Exception:
+                              continue
+                          if e.get("event") != "message":
+                              continue
+                          try:
+                              o = json.loads(e.get("message", "{}"))
+                          except Exception:
+                              continue
+                          oid = o.get("order_id")
+                          if not oid or oid in seen:
+                              continue
+                          seen.add(oid)
+                          if not all(k in o for k in ("order_id", "ig_url", "email")):
+                              print("skip malformed", oid); continue
+                          if not str(o.get("ig_url", "")).startswith("https://www.instagram.com/"):
+                              print("skip bad ig_url", oid); continue
+                          if claim_order(oid):
+                              payload = {"event_type": "anthemsmith-order", "client_payload": o}
+                              st, d = gh_json("POST", f"{GH}/dispatches", payload)
+                              print("dispatched", oid, st)
+                          if len(seen) >= 5:
+                              break
+              except Exception as ex:
+                  print("poll err", ex)
+              time.sleep(15)
+          PY
+
   forge:
+    if: github.event_name == 'repository_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -37,6 +139,9 @@ jobs:
         run: |
           git config user.name "anthemsmith-forge"
           git config user.email "forge@anthemsmith.com"
+          git add songs/
+          git rm --cached --ignore-unmatch "songs/${{ github.event.client_payload.order_id }}.claim.json" || true
+          rm -f "songs/${{ github.event.client_payload.order_id }}.claim.json"
           git add songs/
           git commit -m "song ${{ github.event.client_payload.order_id }}" || echo "nothing to commit"
           git push
