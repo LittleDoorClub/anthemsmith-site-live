@@ -113,22 +113,17 @@ function watchOrder(id,box,tries){
 }
 function payChoicePanel(values){
  const box=$('#brief');box.hidden=false;
- box.innerHTML='<span class="eyebrow">LAST STEP — CHOOSE HOW TO PAY</span><h3>Lock in your song — $5</h3>'
- +'<div class="pay-grid" style="margin-top:14px">'
- +'<div class="pay-card"><b>Card · Apple Pay · Link</b><button class="pay-link" id="payStripe">Pay with Card</button><p class="small">Secure Stripe checkout</p></div>'
- +'<div class="pay-card"><img src="assets/cashapp_qr_gabe_20260915.jpg" alt="Cash App QR" width="140" height="140"><button class="pay-link" id="payCash">Pay with Cash App</button><p class="small">$Gabrielmoneys</p></div>'
- +'<div class="pay-card"><img src="assets/venmo_qr_gabe_20260915.jpg" alt="Venmo QR" width="140" height="140"><button class="pay-link" id="payVenmo">Pay with Venmo</button><p class="small">@Gabriel-Tao</p></div>'
+ box.innerHTML='<span class="eyebrow">LAST STEP</span><h2>Lock in your song — $5</h2>'
+ +'<div class="pay-grid">'
+ +'<div class="pay-card"><b>Pay with Card</b><p class="small">Apple Pay · Link · instant</p><a class="pay-link" href="https://buy.stripe.com/6oU5kE4LT9Md16lbzu14402" target="_blank" rel="noopener">Pay with Card</a></div>'
+ +'<div class="pay-card"><b>Pay with Cash App</b><img class="pay-qr" src="assets/cashapp_qr_gabe_20260915.jpg" alt="Cash App QR" width="220" height="220"><a class="pay-link" href="https://cash.app/$Gabrielmoneys" target="_blank" rel="noopener">Pay with Cash App</a></div>'
+ +'<div class="pay-card"><b>Pay with Venmo</b><img class="pay-qr" src="assets/venmo_qr_gabe_20260915.jpg" alt="Venmo QR" width="220" height="220"><a class="pay-link" href="https://venmo.com/Gabriel-Tao" target="_blank" rel="noopener">Pay with Venmo</a></div>'
  +'</div>'
- +'<p style="text-align:center;margin-top:14px"><button class="instagram-button" id="paidDone">I\u2019ve paid — forge my song</button></p>'
- +'<p class="small" style="text-align:center">Paying opens a secure tab — come back here and tap the button above. Your song plays right on this page when it\u2019s ready.</p>';
- values.request_id='AS-'+Date.now().toString(36).toUpperCase();values.status='pending_payment';values.quoted_price=5;
- sessionStorage.setItem('anthemsmith_order',JSON.stringify(values));
- const go=(url)=>window.open(url,'_blank');
- document.getElementById('payStripe').onclick=()=>go('https://buy.stripe.com/6oU5kE4LT9Md16lbzu14402');
- document.getElementById('payCash').onclick=()=>go('https://cash.app/$Gabrielmoneys');
- document.getElementById('payVenmo').onclick=()=>go('https://venmo.com/Gabriel-Tao');
- document.getElementById('paidDone').onclick=()=>{const raw=sessionStorage.getItem('anthemsmith_order');const data=JSON.parse(raw);sessionStorage.removeItem('anthemsmith_order');box.innerHTML='<p class="small">Payment received. Forging your song…</p>';fireOrder(data).then(()=>watchOrder(data.request_id,box)).catch(e=>{box.innerHTML='<p class="small">Order failed to start: '+e.message+' — your payment is safe, contact us with ID '+data.request_id+'.</p>'})};
-}
+ +'<button class="primary" id="paidDone">I\'ve paid — forge my song</button>'
+ +'<p class="small">Paying opens a secure tab — come back here and your song plays on this page when it\'s ready.</p>';
+ const b=document.getElementById('paidDone');
+ if(b)b.onclick=()=>{values.pay_method=document.querySelector('input[name="pay_method"]:checked')?.value||'card';fireOrder(values).then(()=>watchOrder(values.request_id,box)).catch(e=>{box.innerHTML='<p class="small">Order failed to start: '+e.message+' — your payment is safe, contact us with ID '+values.request_id+'.</p>'})};
+};
 async function submitInstant(){
  const values=Object.fromEntries(Array.from(new FormData($('#songForm'))).filter(([,v])=>typeof v==='string'));
  if(!values.instagram1){$('#brief').hidden=false;$('#brief').innerHTML='<p class="small">Paste your Instagram link first — that is the one thing we need.</p>';return}
