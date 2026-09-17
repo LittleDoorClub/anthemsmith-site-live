@@ -76,7 +76,7 @@ jobs:
           for _ in range(3):
               try:
                   with urllib.request.urlopen(
-                      "https://ntfy.sh/as-anthemsmith-orders-v1/json?poll=1&since=12m",
+                      "https://ntfy.sh/as-anthemsmith-orders-v1/json?poll=1&since=12h",
                       timeout=30) as r:
                       for ln in r.read().decode().splitlines():
                           try:
