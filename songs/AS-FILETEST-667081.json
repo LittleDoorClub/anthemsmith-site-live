@@ -1,0 +1,22 @@
+{
+ "order_id": "AS-FILETEST-667081",
+ "status": "delivered",
+ "handle": null,
+ "category": "My Story",
+ "display_name": null,
+ "duration_full": 215.066064,
+ "model": "V6",
+ "heart_anchor": "file-intake pipeline test 2 \u2014 post 10-key fix",
+ "heart_anchor_source": "brief",
+ "sources": {
+  "bio": false,
+  "captions_used": 0,
+  "alts_seen": 0,
+  "alt_lines_used": 0,
+  "details": true,
+  "anchor_source": "brief",
+  "render_status": null,
+  "render_chrome": null
+ },
+ "ingest_note": ""
+}
