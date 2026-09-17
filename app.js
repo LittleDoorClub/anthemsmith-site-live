@@ -97,6 +97,13 @@ function songURL(id){return 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH
 async function fireOrder(data){
  // Relay via ntfy (public topic, JSON body). The forge poller picks it up and
  // fires the GitHub dispatch with the repo secret server-side.
+ // FIX 09-17 (AS-ORDERID): guarantee a STABLE order id on EVERY call path. Before this,
+ // request_id was minted only inside the uncalled requestData(), so data.request_id was
+ // undefined here; JSON.stringify drops undefined keys, the relay message carried no
+ // order_id, and the poller's `if not oid: continue` silently skipped every real order.
+ // Minting here (synchronously, before the first await) also seeds the same id into
+ // sessionStorage on the awaiting_payment fire, so the ?paid=1 resume cannot double-order.
+ if(!data.request_id)data.request_id='AS-'+Date.now().toString(36).toUpperCase();
  const ord={order_id:data.request_id,ig_url:data.instagram1||'',category:data.category||'My Story',mood:data.mood||'',voice:data.voice||'Surprise me',details:data.details||'',email:data.email||'',sms_to:data.sms_to||'',delivery:data.delivery||'sms',pay_method:data.pay_method||'card'};
  const r=await fetch('https://ntfy.sh/as-anthemsmith-orders-v1',{method:'POST',headers:{'Content-Type':'application/json','Title':'anthemsmith-order','X-Order-Id':data.request_id,'Tags':'anvil'},body:JSON.stringify(ord)});
  if(!r.ok)throw new Error('relay '+r.status);
