@@ -44,13 +44,28 @@ if IG_URL:
     except Exception:
         ig_ingest = None
     html = ""
+    render_status = None
+    render_chrome = None
     if ig_ingest is not None:
         # STAGE 1.5.a ANCHOR -- logged-out, no account, no vendor. A plain
         # urllib GET of this URL returns a JS shell with 0 captions and a
         # Follower/Following/Posts count line (measured 2026-09-16), which is
         # why the old path invented an anchor. The rendered DOM carries the
         # real captions (grid img alt) and the profile payload.
-        html = ig_ingest.render_handle(handle) or ""
+        # render_handle_detail ALSO reports WHY a render produced nothing
+        # (no_renderer / login_wall / empty / bad_handle): those causes are not
+        # interchangeable, and folding them into one string is what made an
+        # empty live order read as "the customer's profile is private".
+        if hasattr(ig_ingest, "render_handle_detail"):
+            rd = ig_ingest.render_handle_detail(handle)
+            html = rd.get("html") or ""
+            render_status = rd.get("status")
+            render_chrome = rd.get("chrome")
+            print("RENDER handle=%s status=%s bytes=%s chrome=%s head=%r"
+                  % (handle, render_status, rd.get("bytes"), render_chrome,
+                     (rd.get("head") or "").replace("\n", " ")[:160]), flush=True)
+        else:
+            html = ig_ingest.render_handle(handle) or ""
     if not html:
         try:
             html = fetch(f"https://www.instagram.com/{handle}/").decode("utf-8", "ignore")
@@ -58,8 +73,13 @@ if IG_URL:
         except Exception:
             html = ""
             ingest_note = "profile unreachable (private/deleted/blocked)"
+    if not html and not render_status:
+        render_status = "unavailable"
     if ig_ingest is not None and html:
-        info = ig_ingest.ingest(html, handle)
+        try:
+            info = ig_ingest.ingest(html, handle, render_status=render_status)
+        except TypeError:  # an older ig_ingest revision: never crash the lane
+            info = ig_ingest.ingest(html, handle)
         bio = info["bio"] or ""
         captions = info["captions"]
         alt_texts = info["alt_texts"]
@@ -75,7 +95,8 @@ if IG_URL:
 
 sources = {"handle": handle, "bio": bio, "captions": captions, "alts": alt_texts,
            "alt_lines": alt_lines,
-           "details": DETAILS, "category": CATEGORY, "mood": MOOD, "note": ingest_note}
+           "details": DETAILS, "category": CATEGORY, "mood": MOOD, "note": ingest_note,
+           "render_status": render_status, "render_chrome": render_chrome}
 
 # ---------- 2. VIBE READ (only what is visible; unknown stays null) ----------
 name = display_name or handle or ""
@@ -107,6 +128,40 @@ elif captions:
     anchor, anchor_src = captions[0].strip(), "ig-caption"
 else:
     anchor, anchor_src = None, None
+
+# ---------- 4b. SHIP GATE -- no heart anchor, no ship (house law) ----------
+# Measured on this lane 2026-09-17: order AS-ANCHORPROOF1 committed
+# songs/AS-ANCHORPROOF1.json with heart_anchor=null and status="delivered".
+# The F1 fence stopped this lane INVENTING a line; nothing stopped it SHIPPING
+# without one, and app.js treats the EXISTENCE of songs/<id>.json as "Your song
+# is ready" -- so a committed anchorless build is a broken product in front of a
+# paying customer.
+# The gate fires BEFORE the paid generation (a song that must not ship must not
+# cost $0.10 either) and exits non-zero: the run goes RED, no song is committed,
+# and the customer page keeps waiting instead of celebrating a missing mp3. It
+# is re-attempted on the next tick and self-heals the moment the profile becomes
+# readable. The blocked record is written to <OID>.blocked.json -- NEVER
+# <OID>.json, which the customer page polls.
+if not anchor:
+    reason = ("no verbatim, source-backed line was readable -- refusing to "
+              "invent the customer's chorus (house law: no heart anchor => no "
+              "ship). render_status=" + str(render_status))
+    blocked = {"order_id": OID, "status": "blocked_no_anchor", "reason": reason,
+               "handle": handle, "category": CATEGORY, "mood": MOOD,
+               "display_name": display_name or None,
+               "duration_full": None, "model": None,
+               "heart_anchor": None, "heart_anchor_source": None,
+               "sources": {"bio": bool(bio), "captions_used": len(captions),
+                           "alts_seen": len(alt_texts),
+                           "alt_lines_used": len(alt_lines),
+                           "details": bool(DETAILS), "anchor_source": None,
+                           "render_status": render_status,
+                           "render_chrome": render_chrome},
+               "ingest_note": ingest_note}
+    json.dump(blocked, open(f"{OUT}/{OID}.blocked.json", "w"), indent=1)
+    print("BLOCKED", OID, "-", reason, flush=True)
+    sys.exit(2)
+
 banned = r"\b(forever|always|journey|unbreakable|shine bright|dreams come true|heart of gold)\b"
 def clean(s): return re.sub(banned, "real", s, flags=re.I)
 
@@ -208,7 +263,9 @@ meta = {"order_id": OID, "status": "delivered", "handle": handle, "category": CA
         "heart_anchor": anchor, "heart_anchor_source": anchor_src,
         "sources": {"bio": bool(bio), "captions_used": len(captions),
                     "alts_seen": len(alt_texts), "alt_lines_used": len(alt_lines),
-                    "details": bool(DETAILS), "anchor_source": anchor_src},
+                    "details": bool(DETAILS), "anchor_source": anchor_src,
+                    "render_status": render_status,
+                    "render_chrome": render_chrome},
         "ingest_note": ingest_note}
 json.dump(meta, open(f"{OUT}/{OID}.json", "w"), indent=1)
 print("DELIVERED", OID, dur, "anchor=", (anchor or "(none)")[:60], "src=", anchor_src)
