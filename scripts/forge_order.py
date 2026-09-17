@@ -136,6 +136,9 @@ if ig_ingest is not None:
     anchor, anchor_src = ig_ingest.pick_anchor(captions, alt_lines, DETAILS, handle)
 elif captions:
     anchor, anchor_src = captions[0].strip(), "ig-caption"
+elif DETAILS:
+    # file-intake orders: the customer's own brief words ARE verbatim source
+    anchor, anchor_src = DETAILS.strip(), "brief"
 else:
     anchor, anchor_src = None, None
 
