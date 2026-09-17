@@ -42,6 +42,7 @@ display_name = ""
 ingest_note = ""
 render_status = None
 render_chrome = None
+ig_ingest = None  # file-intake orders never enter the IG branch; pick_anchor gate below must not NameError
 if IG_URL:
     m = re.search(r"instagram\.com/([A-Za-z0-9_.]+)/?", IG_URL)
     if not m:
