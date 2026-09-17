@@ -1,0 +1,22 @@
+{
+ "order_id": "AS-FILETEST-669371",
+ "status": "delivered",
+ "handle": null,
+ "category": "My Story",
+ "display_name": null,
+ "duration_full": 210.36089,
+ "model": "V6",
+ "heart_anchor": "Built this from nothing - Tampa to the world. Every scar is a lesson.",
+ "heart_anchor_source": "brief",
+ "sources": {
+  "bio": false,
+  "captions_used": 0,
+  "alts_seen": 0,
+  "alt_lines_used": 0,
+  "details": true,
+  "anchor_source": "brief",
+  "render_status": null,
+  "render_chrome": null
+ },
+ "ingest_note": ""
+}
