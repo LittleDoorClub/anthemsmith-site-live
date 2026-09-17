@@ -93,10 +93,13 @@ jobs:
                           if not oid or oid in seen:
                               continue
                           seen.add(oid)
-                          if not all(k in o for k in ("order_id", "ig_url", "email")):
+                          if not all(k in o for k in ("order_id", "email")):
                               print("skip malformed", oid); continue
-                          if not str(o.get("ig_url", "")).startswith("https://www.instagram.com/"):
+                          ig = str(o.get("ig_url", "")).strip()
+                          intake = str(o.get("intake", "link"))
+                          if intake == "link" and not ig.startswith("https://www.instagram.com/"):
                               print("skip bad ig_url", oid); continue
+                          # screenshot/photos intake: forge runs on captions/details, no profile scrape needed
                           if claim_order(oid):
                               payload = {"event_type": "anthemsmith-order", "client_payload": o}
                               st, d = gh_json("POST", f"{GH}/dispatches", payload)
