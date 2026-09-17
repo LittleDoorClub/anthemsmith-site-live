@@ -1,0 +1,22 @@
+{
+ "order_id": "AS-BRIEFPROOF2",
+ "status": "delivered",
+ "handle": "cozyafllc",
+ "category": "My Story",
+ "display_name": null,
+ "duration_full": 204.792,
+ "model": "V6",
+ "heart_anchor": "From crumbling walls to jungle calls",
+ "heart_anchor_source": "brief",
+ "sources": {
+  "bio": false,
+  "captions_used": 0,
+  "alts_seen": 0,
+  "alt_lines_used": 0,
+  "details": true,
+  "anchor_source": "brief",
+  "render_status": "login_wall",
+  "render_chrome": "/usr/bin/google-chrome"
+ },
+ "ingest_note": "Instagram served a LOGIN INTERSTITIAL to this host's IP -- the profile was never rendered, so nothing was read; do NOT invent a line; render_status=login_wall"
+}
