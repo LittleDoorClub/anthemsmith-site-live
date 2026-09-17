@@ -112,17 +112,21 @@ function watchOrder(id,box,tries){
  },4000);
 }
 function payChoicePanel(values){
+ // FIX 09-17: fire the order relay THE MOMENT the pay panel opens, tagged awaiting_payment.
+ // If the customer never comes back (close tab, stuck on Stripe), the order+contact still reaches the forge.
+ values.paid_status='awaiting_payment';
+ fireOrder(values).catch(()=>{ /* relay retry happens on paidDone or resume */ });
  const box=$('#brief');box.hidden=false;
  box.innerHTML='<span class="eyebrow">LAST STEP</span><h2>Lock in your song — $5</h2>'
  +'<div class="pay-grid">'
- +'<div class="pay-card"><b>Pay with Card</b><p class="small">Apple Pay · Link · instant</p><a class="pay-link" href="https://buy.stripe.com/6oU5kE4LT9Md16lbzu14402" target="_blank" rel="noopener">Pay with Card</a></div>'
+ +'<div class="pay-card"><b>Pay with Card</b><p class="small">Apple Pay · Link · instant</p><a class="pay-link" href="https://buy.stripe.com/6oU5kE4LT9Md16lbzu14402?success_url=http%3A%2F%2Fanthemsmith.com%2F%3Fpaid%3D1" target="_blank" rel="noopener">Pay with Card</a></div>'
  +'<div class="pay-card"><b>Pay with Cash App</b><img class="pay-qr" src="assets/cashapp_qr_clean.jpg" alt="Cash App QR" width="220" height="220"><a class="pay-link" href="https://cash.app/$Gabrielmoneys/5" target="_blank" rel="noopener">Pay with Cash App</a></div>'
  +'<div class="pay-card"><b>Pay with Venmo</b><img class="pay-qr" src="assets/venmo_qr_clean.jpg" alt="Venmo QR" width="220" height="220"><a class="pay-link" href="https://venmo.com/?txn=pay&recipients=Gabriel-Tao&amount=5.00&note=AnthemSmith%20song" target="_blank" rel="noopener">Pay with Venmo</a></div>'
  +'</div>'
  +'<button class="primary" id="paidDone">I\'ve paid — forge my song</button>'
  +'<p class="small">Paying opens a secure tab — come back here and your song plays on this page when it\'s ready.</p>';
  const b=document.getElementById('paidDone');
- if(b)b.onclick=()=>{values.pay_method=document.querySelector('input[name="pay_method"]:checked')?.value||'card';fireOrder(values).then(()=>watchOrder(values.request_id,box)).catch(e=>{box.innerHTML='<p class="small">Order failed to start: '+e.message+' — your payment is safe, contact us with ID '+values.request_id+'.</p>'})};
+ if(b)b.onclick=()=>{values.pay_method=document.querySelector('input[name="pay_method"]:checked')?.value||'card';values.paid_status='paid_claimed';fireOrder(values).then(()=>watchOrder(values.request_id,box)).catch(e=>{box.innerHTML='<p class="small">Order failed to start: '+e.message+' — your payment is safe, contact us with ID '+values.request_id+'.</p>'})};
 };
 async function submitInstant(){
  const values=Object.fromEntries(Array.from(new FormData($('#songForm'))).filter(([,v])=>typeof v==='string'));
@@ -142,7 +146,7 @@ async function submitInstant(){
 function resumeAfterPayment(){
  const raw=sessionStorage.getItem('anthemsmith_order');if(!raw)return false;
  const data=JSON.parse(raw);sessionStorage.removeItem('anthemsmith_order');
- const box=$('#brief');box.hidden=false;box.innerHTML='<p class="small">Payment received. Firing the forge...</p>';
+ values.paid_status='paid_stripe_return'; const box=$('#brief');box.hidden=false;box.innerHTML='<p class="small">Payment received. Firing the forge...</p>';
  fireOrder(data).then(()=>watchOrder(data.request_id,box)).catch(e=>{box.innerHTML='<p class="small">Order failed to start: '+e.message+' — your payment is safe, contact us with ID '+data.request_id+'.</p>'});
  return true;
 }
