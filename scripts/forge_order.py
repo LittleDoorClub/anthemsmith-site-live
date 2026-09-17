@@ -17,7 +17,14 @@ DETAILS = os.environ.get("DETAILS", "")
 MUAPI = os.environ["MUAPI_KEY"]
 
 def die(msg):
-    json.dump({"order_id": OID, "status": "failed", "reason": msg}, open(f"{OUT}/{OID}.json", "w"))
+    # NEVER write <OID>.json on failure: songs/<OID>.json is the DELIVERED signal.
+    # app.js's order poll celebrated on r.ok alone, and the relay poller's
+    # claim_order() skips any order whose <OID>.json exists -> a failed record
+    # would both fake a "Your song is ready" and permanently block the retry.
+    # Failure records now live beside the delivered signal, mirroring the
+    # AS-ANCHOR-GATE <OID>.blocked.json pattern (never the polled path).
+    json.dump({"order_id": OID, "status": "failed", "reason": msg},
+              open(f"{OUT}/{OID}.failed.json", "w"))
     sys.exit(1)
 
 # ---------- 1. INGEST (public profile only) ----------
