@@ -133,6 +133,9 @@ jobs:
           MOOD: ${{ github.event.client_payload.mood }}
           VOICE: ${{ github.event.client_payload.voice }}
           DETAILS: ${{ github.event.client_payload.details }}
+          DELIVERY: ${{ github.event.client_payload.delivery }}
+          SMS_TO: ${{ github.event.client_payload.sms_to }}
+          EMAIL: ${{ github.event.client_payload.email }}
         run: python scripts/forge_order.py
 
       - name: Commit the delivered song
@@ -145,3 +148,17 @@ jobs:
           git add songs/
           git commit -m "song ${{ github.event.client_payload.order_id }}" || echo "nothing to commit"
           git push
+
+      - name: Deliver the song link (SMS / Email)
+        if: success()
+        env:
+          TWILIO_SID: ${{ secrets.TWILIO_SID }}
+          TWILIO_TOKEN: ${{ secrets.TWILIO_TOKEN }}
+          TWILIO_FROM: ${{ secrets.TWILIO_FROM }}
+          GABE_CC: ${{ secrets.GABE_CC }}
+          RESEND_KEY: ${{ secrets.RESEND_KEY }}
+          ORDER_ID: ${{ github.event.client_payload.order_id }}
+          DELIVERY: ${{ github.event.client_payload.delivery }}
+          SMS_TO: ${{ github.event.client_payload.sms_to }}
+          EMAIL: ${{ github.event.client_payload.email }}
+        run: python scripts/deliver_song.py

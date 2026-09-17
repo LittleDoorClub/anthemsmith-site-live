@@ -97,7 +97,7 @@ function songURL(id){return 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH
 async function fireOrder(data){
  // Relay via ntfy (public topic, JSON body). The forge poller picks it up and
  // fires the GitHub dispatch with the repo secret server-side.
- const ord={order_id:data.request_id,ig_url:data.instagram1||'',category:data.category||'My Story',mood:data.mood||'',voice:data.voice||'Surprise me',details:data.details||'',email:data.email||'',pay_method:data.pay_method||'card'};
+ const ord={order_id:data.request_id,ig_url:data.instagram1||'',category:data.category||'My Story',mood:data.mood||'',voice:data.voice||'Surprise me',details:data.details||'',email:data.email||'',sms_to:data.sms_to||'',delivery:data.delivery||'sms',pay_method:data.pay_method||'card'};
  const r=await fetch('https://ntfy.sh/as-anthemsmith-orders-v1',{method:'POST',headers:{'Content-Type':'application/json','Title':'anthemsmith-order','X-Order-Id':data.request_id,'Tags':'anvil'},body:JSON.stringify(ord)});
  if(!r.ok)throw new Error('relay '+r.status);
  return data.request_id;
@@ -123,10 +123,21 @@ function payChoicePanel(values){
  +'<div class="pay-card"><b>Pay with Cash App</b><img class="pay-qr" src="assets/cashapp_qr_clean.jpg" alt="Cash App QR" width="220" height="220"><a class="pay-link" href="https://cash.app/$Gabrielmoneys/5" target="_blank" rel="noopener">Pay with Cash App</a></div>'
  +'<div class="pay-card"><b>Pay with Venmo</b><img class="pay-qr" src="assets/venmo_qr_clean.jpg" alt="Venmo QR" width="220" height="220"><a class="pay-link" href="https://venmo.com/?txn=pay&recipients=Gabriel-Tao&amount=5.00&note=AnthemSmith%20song" target="_blank" rel="noopener">Pay with Venmo</a></div>'
  +'</div>'
+ +'<div class="delivery-block" style="margin:14px 0;padding:12px;border:1px solid #ddd;border-radius:10px">'
+ +'<b>Get your song:</b> <label style="margin-right:10px"><input type="radio" name="delivery" value="sms" checked onchange="window.__renderDelivery()"> Text me the link</label>'
+ +'<label><input type="radio" name="delivery" value="email" onchange="window.__renderDelivery()"> Email me the link</label>'
+ +'<div id="deliveryFields" style="margin-top:8px"><input type="tel" id="deliveryPhone" placeholder="Your cell number — song lands by SMS" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px"></div>'
+ +'</div>'
  +'<button class="primary" id="paidDone">I\'ve paid — forge my song</button>'
  +'<p class="small">Paying opens a secure tab — come back here and your song plays on this page when it\'s ready.</p>';
  const b=document.getElementById('paidDone');
- if(b)b.onclick=()=>{values.pay_method=document.querySelector('input[name="pay_method"]:checked')?.value||'card';values.paid_status='paid_claimed';fireOrder(values).then(()=>watchOrder(values.request_id,box)).catch(e=>{box.innerHTML='<p class="small">Order failed to start: '+e.message+' — your payment is safe, contact us with ID '+values.request_id+'.</p>'})};
+ if(b)b.onclick=()=>{values.pay_method=document.querySelector('input[name="pay_method"]:checked')?.value||'card';
+ const dMode=(document.querySelector('input[name="delivery"]:checked')||{}).value||'sms';
+ if(dMode==='sms'){const ph=(document.getElementById('deliveryPhone')||{}).value||'';if(!ph.trim()){box.innerHTML='<p class="small">Add your cell number so we can text the song — or switch to email above.</p>';return}values.sms_to=ph.trim();}
+ else{const em=(document.getElementById('deliveryEmail')||{}).value||'';if(!em.trim()||!em.includes('@')){box.innerHTML='<p class="small">Add your email so we can send the song — or switch to text above.</p>';return}values.email=em.trim();}
+ values.delivery=dMode;
+ try{sessionStorage.setItem('anthemsmith_order',JSON.stringify(values))}catch(e){}
+ values.paid_status='paid_claimed';fireOrder(values).then(()=>watchOrder(values.request_id,box)).catch(e=>{box.innerHTML='<p class="small">Order failed to start: '+e.message+' — your payment is safe, contact us with ID '+values.request_id+'.</p>'})};
 };
 async function submitInstant(){
  const values=Object.fromEntries(Array.from(new FormData($('#songForm'))).filter(([,v])=>typeof v==='string'));
@@ -146,6 +157,31 @@ async function submitInstant(){
 function resumeAfterPayment(){
  const raw=sessionStorage.getItem('anthemsmith_order');if(!raw)return false;
  const data=JSON.parse(raw);sessionStorage.removeItem('anthemsmith_order');
+ // Ask delivery here if the customer never picked one — never strand a paid song.
+ if(!data.delivery || (!data.sms_to && !data.email)){
+  const box=$('#brief');box.hidden=false;
+  box.innerHTML='<span class="eyebrow">PAID ✓</span><h2>Where should your song go?</h2>'
+   +'<div style="margin:12px 0"><label style="margin-right:12px"><input type="radio" name="resDelivery" value="sms" checked onchange="window.__renderResFields()"> Text it to my phone</label>'
+   +'<label><input type="radio" name="resDelivery" value="email" onchange="window.__renderResFields()"> Email it</label></div>'
+   +'<div id="resFields"><input type="tel" id="resContact" placeholder="Your cell number" style="width:100%;max-width:340px;padding:10px;border:1px solid #ccc;border-radius:6px"></div>'
+   +'<button class="primary" id="resSend" style="margin-top:10px">Send my song</button>';
+  window.__renderResFields=function(){
+   const m=(document.querySelector('input[name="resDelivery"]:checked')||{}).value||'sms';
+   document.getElementById('resFields').innerHTML = m==='sms'
+    ? '<input type="tel" id="resContact" placeholder="Your cell number" style="width:100%;max-width:340px;padding:10px;border:1px solid #ccc;border-radius:6px">'
+    : '<input type="email" id="resContact" placeholder="you@email.com" style="width:100%;max-width:340px;padding:10px;border:1px solid #ccc;border-radius:6px">';
+  };
+  document.getElementById('resSend').onclick=()=>{
+   const m=(document.querySelector('input[name="resDelivery"]:checked')||{}).value||'sms';
+   const v=document.getElementById('resContact').value.trim();
+   if(!v){document.getElementById('resFields').style.borderColor='red';return}
+   data.delivery=m; if(m==='sms')data.sms_to=v; else data.email=v;
+   try{sessionStorage.setItem('anthemsmith_order',JSON.stringify(data))}catch(e){}
+   const box2=$('#brief');box2.innerHTML='<p class="small">Firing the forge...</p>';
+   fireOrder(data).then(()=>watchOrder(data.request_id,box2)).catch(e=>{box2.innerHTML='<p class="small">Order failed to start: '+e.message+' — contact us with ID '+data.request_id+'.</p>'});
+  };
+  return true;
+ }
  values.paid_status='paid_stripe_return'; const box=$('#brief');box.hidden=false;box.innerHTML='<p class="small">Payment received. Firing the forge...</p>';
  fireOrder(data).then(()=>watchOrder(data.request_id,box)).catch(e=>{box.innerHTML='<p class="small">Order failed to start: '+e.message+' — your payment is safe, contact us with ID '+data.request_id+'.</p>'});
  return true;
@@ -162,3 +198,11 @@ window.addEventListener('load',()=>{
 });
 
 pickLane(0);
+
+window.__renderDelivery=function(){
+ const m=(document.querySelector('input[name="delivery"]:checked')||{}).value||'sms';
+ const df=document.getElementById('deliveryFields');
+ if(df)df.innerHTML = m==='sms'
+  ? '<input type="tel" id="deliveryPhone" placeholder="Your cell number — song lands by SMS" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px">'
+  : '<input type="email" id="deliveryEmail" placeholder="you@email.com — song lands in your inbox" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px">';
+};
