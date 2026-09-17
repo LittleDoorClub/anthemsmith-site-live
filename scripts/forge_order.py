@@ -29,31 +29,60 @@ def fetch(url, timeout=25):
 handle = None
 bio = ""
 captions = []
+alt_texts = []
+alt_lines = []
+display_name = ""
+ingest_note = ""
 if IG_URL:
     m = re.search(r"instagram\.com/([A-Za-z0-9_.]+)/?", IG_URL)
     if not m:
         die("bad instagram url")
     handle = m.group(1)
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     try:
-        html = fetch(f"https://www.instagram.com/{handle}/").decode("utf-8", "ignore")
-        # public metadata only: og:description carries bio + recent caption snippets
-        md = re.search(r'<meta property="og:description" content="([^"]*)"', html)
+        import ig_ingest
+    except Exception:
+        ig_ingest = None
+    html = ""
+    if ig_ingest is not None:
+        # STAGE 1.5.a ANCHOR -- logged-out, no account, no vendor. A plain
+        # urllib GET of this URL returns a JS shell with 0 captions and a
+        # Follower/Following/Posts count line (measured 2026-09-16), which is
+        # why the old path invented an anchor. The rendered DOM carries the
+        # real captions (grid img alt) and the profile payload.
+        html = ig_ingest.render_handle(handle) or ""
+    if not html:
+        try:
+            html = fetch(f"https://www.instagram.com/{handle}/").decode("utf-8", "ignore")
+            ingest_note = "headless renderer unavailable: static shell read"
+        except Exception:
+            html = ""
+            ingest_note = "profile unreachable (private/deleted/blocked)"
+    if ig_ingest is not None and html:
+        info = ig_ingest.ingest(html, handle)
+        bio = info["bio"] or ""
+        captions = info["captions"]
+        alt_texts = info["alt_texts"]
+        alt_lines = info.get("alt_lines") or []
+        display_name = info["display_name"] or ""
+        if info["notes"]:
+            ingest_note = (ingest_note + "; " if ingest_note else "") + "; ".join(info["notes"])
+    elif html:
+        # ig_ingest missing (never expected): keep an OG-title read only. The
+        # og:description count line is NOT a bio and NOT a caption.
         t = re.search(r'<meta property="og:title" content="([^"]*)"', html)
-        bio = (md.group(1) if md else "")
-        full = (t.group(1) if t else "") + " | " + bio
-        caps = re.findall(r'"caption":"([^"]{15,220})"', html) or re.findall(r'edge_media_to_caption.*?"text":"([^"]{15,220})"', html)
-        captions = [c.encode().decode("unicode_escape", "ignore") for c in caps[:12]]
-    except Exception as e:
-        # public profile unreachable (private/deleted/blocked): fall back to details-only brief
-        bio, captions = "", []
+        display_name = (t.group(1) if t else "")
 
-sources = {"handle": handle, "bio": bio, "captions": captions, "details": DETAILS, "category": CATEGORY, "mood": MOOD}
+sources = {"handle": handle, "bio": bio, "captions": captions, "alts": alt_texts,
+           "alt_lines": alt_lines,
+           "details": DETAILS, "category": CATEGORY, "mood": MOOD, "note": ingest_note}
 
 # ---------- 2. VIBE READ (only what is visible; unknown stays null) ----------
-name = handle or ""
+name = display_name or handle or ""
 lines = []
 if bio: lines.append(bio)
 lines += captions
+lines += alt_lines
 if DETAILS: lines.append(DETAILS)
 corpus = " / ".join(lines)
 words = re.findall(r"[A-Za-z']{4,}", corpus.lower())
@@ -68,15 +97,24 @@ band = {"My Story": "boom-bap hip-hop, 92 BPM, dusty drums, warm bass, confident
 style = band.get(CATEGORY, band["My Story"])
 if "hip" in corpus or "gym" in corpus: style = band["My Story"]
 
-# ---------- 4. LYRICS (heart anchor = most specific visible line; anti-cliche) ----------
-anchor = captions[0][:90] if captions else (bio[:90] if bio else (DETAILS[:90] or f"{name} is one of the real ones"))
+# ---------- 4. LYRICS (heart anchor = most specific VISIBLE line; anti-cliche) ----------
+# F1 fence: no verbatim source -> NO anchor. Never synthesise a fallback string
+# (the old code shipped f"{name} is one of the real ones" and follower-count
+# lines as the customer's chorus -- an invented line with zero sources).
+if ig_ingest is not None:
+    anchor, anchor_src = ig_ingest.pick_anchor(captions, alt_lines, DETAILS, handle)
+elif captions:
+    anchor, anchor_src = captions[0].strip(), "ig-caption"
+else:
+    anchor, anchor_src = None, None
 banned = r"\b(forever|always|journey|unbreakable|shine bright|dreams come true|heart of gold)\b"
 def clean(s): return re.sub(banned, "real", s, flags=re.I)
 
 v1 = clean(f"They say {name} keeps it real, ask the regulars how it feels," if name else "Some folks just carry the room, from the first hello to the last song,")
 v2 = clean(corpus[:160]) if corpus else "Every detail says the same thing, the real ones know it's true,"
 pre = "And when the moment came, they didn't even flinch,"
-chorus = clean(f"{anchor} — that's the whole story, that's the anthem right here,")
+chorus = clean(f"{anchor} — that's the whole story, that's the anthem right here," if anchor
+               else "Say it plain, say it loud, this one's yours and it's true,")
 chorus2 = clean(f"Put it on the speaker, let the whole block hear, {name}, this one's yours,")
 
 lyrics = f"""[Verse 1]
@@ -125,6 +163,7 @@ def poll(rid, max_s=840):
     return {"status": "timeout"}
 
 gender = "male" if VOICE.lower().startswith("m") else ("female" if VOICE.lower().startswith("f") else "male")
+model_used = "V6"
 sub = post({"prompt": lyrics, "style": style, "title": f"AnthemSmith {OID}", "custom_mode": True,
             "instrumental": False, "vocal_gender": gender, "model": "V6", "duration": 205,
             "negative_tags": "sad, ballad, piano lead, cheesy, autotune"})
@@ -134,6 +173,7 @@ d = res.get("data") or res
 outs = d.get("outputs") or []
 if not outs:
     # V6 422-style fallback: one V4_5 shot
+    model_used = "V4_5"
     sub = post({"prompt": lyrics, "style": style, "title": f"AnthemSmith {OID}", "custom_mode": True,
                 "instrumental": False, "vocal_gender": gender, "model": "V4_5",
                 "negative_tags": "sad, ballad, piano lead, cheesy, autotune"})
@@ -163,7 +203,12 @@ os.replace(f"{OUT}/{OID}-t1.mp3", f"{OUT}/{OID}-full.mp3")
 os.remove(f"{OUT}/{OID}-t1v.mp3")
 
 meta = {"order_id": OID, "status": "delivered", "handle": handle, "category": CATEGORY,
-        "duration_full": dur, "model": "V6" if outs else "V4_5", "heart_anchor": anchor,
-        "sources": {"bio": bool(bio), "captions_used": len(captions), "details": bool(DETAILS)}}
+        "display_name": display_name or None,
+        "duration_full": dur, "model": model_used,
+        "heart_anchor": anchor, "heart_anchor_source": anchor_src,
+        "sources": {"bio": bool(bio), "captions_used": len(captions),
+                    "alts_seen": len(alt_texts), "alt_lines_used": len(alt_lines),
+                    "details": bool(DETAILS), "anchor_source": anchor_src},
+        "ingest_note": ingest_note}
 json.dump(meta, open(f"{OUT}/{OID}.json", "w"), indent=1)
-print("DELIVERED", OID, dur)
+print("DELIVERED", OID, dur, "anchor=", (anchor or "(none)")[:60], "src=", anchor_src)
