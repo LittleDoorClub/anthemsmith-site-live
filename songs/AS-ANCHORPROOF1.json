@@ -1,0 +1,20 @@
+{
+ "order_id": "AS-ANCHORPROOF1",
+ "status": "delivered",
+ "handle": "cozyafllc",
+ "category": "My Story",
+ "display_name": null,
+ "duration_full": 204.144,
+ "model": "V6",
+ "heart_anchor": null,
+ "heart_anchor_source": null,
+ "sources": {
+  "bio": false,
+  "captions_used": 0,
+  "alts_seen": 0,
+  "alt_lines_used": 0,
+  "details": false,
+  "anchor_source": null
+ },
+ "ingest_note": "no rendered posts or alts (private handle, empty profile, or a shell that never executed) -- nothing to anchor beyond the profile meta; do NOT invent a line"
+}
