@@ -40,6 +40,8 @@ alt_texts = []
 alt_lines = []
 display_name = ""
 ingest_note = ""
+render_status = None
+render_chrome = None
 if IG_URL:
     m = re.search(r"instagram\.com/([A-Za-z0-9_.]+)/?", IG_URL)
     if not m:
