@@ -52,58 +52,151 @@ _COUNT_LINE = re.compile(r"^\s*[\d,]+\s+Followers\b.*?\bSee Instagram", re.I | r
 # person's own words, so neither may become a heart anchor.
 _WRAP = re.compile(r"^(Photo|Video) by\b", re.I)
 _METADESC = re.compile(r"May be (an image|a close-up|a graphic|text|a screenshot|a picture)", re.I)
+# A datacenter IP is a different failure from a missing binary and from an
+# empty profile. Instagram serves a login interstitial to most cloud IPs, and
+# its DOM carries one of these markers instead of the profile grid.
+_LOGIN_WALL = re.compile(
+    r"(Log in to Instagram|loginForm|accounts/login|You must log in|"
+    r"Sorry, this page isn't available|Restricted profile|"
+    r"Sign up to see|page isn't available)", re.I)
+
+# render_detail() status vocabulary (see render_detail docstring).
+RENDER_STATUSES = ("no_renderer", "empty", "login_wall", "posts", "html_no_posts")
 
 
 # ------------------------------------------------------------------ browser
 def chrome_bin():
-    """Locate a Chrome/Chromium binary. Honors CHROME_BIN first."""
-    env = os.environ.get("CHROME_BIN")
-    if env and os.path.exists(env):
-        return env
+    """Locate a Chrome/Chromium binary. Honors CHROME_BIN first.
+
+    Env vars win (CHROME_BIN / GOOGLE_CHROME_BIN / CHROME_PATH), then PATH,
+    then the well-known install locations -- including /opt/google/chrome/chrome,
+    which is where the ubuntu-24.04 GitHub runner image installs the Google
+    Chrome it ships. (Measured 2026-09-17: that image includes "Google Chrome
+    152" in its manifest, so "the runner has no browser" was never a supported
+    reading of an empty render -- see render_detail.)
+    """
+    for var in ("CHROME_BIN", "GOOGLE_CHROME_BIN", "CHROME_PATH"):
+        env = os.environ.get(var)
+        if env and os.path.exists(env):
+            return env
     for name in ("google-chrome", "google-chrome-stable", "chromium",
-                 "chromium-browser", "chrome"):
+                 "chromium-browser", "chrome", "chrome-headless-shell"):
         p = shutil.which(name)
         if p:
             return p
     for p in (r"C:\Program Files\Google\Chrome\Application\chrome.exe",
               r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-              "/usr/bin/google-chrome", "/usr/bin/chromium",
-              "/usr/bin/chromium-browser"):
+              "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable",
+              "/usr/bin/chromium", "/usr/bin/chromium-browser",
+              "/opt/google/chrome/chrome"):
         if os.path.exists(p):
             return p
     return None
 
 
-def render(url, budget_ms=BUDGET_MS, timeout=180):
-    """Render a URL logged-out and return the executed DOM, or "" on any failure.
+def render_detail(url, budget_ms=BUDGET_MS, timeout=180):
+    """Render a URL logged-out and return the CAUSE, not just an empty string.
 
-    Never raises: a missing renderer, a blocked profile or a timeout all
-    degrade to an empty string, which the caller treats as 'nothing readable',
-    NEVER as 'invent something'.
+    Why this exists (measured on the live lane, 2026-09-17). The forge job on
+    GitHub Actions committed ``songs/AS-ANCHORPROOF1.json`` with
+    ``heart_anchor: null`` and the note "no rendered posts or alts (private
+    handle, empty profile, or a shell that never executed)". Those are three
+    different defects -- a missing binary, a cloud-IP login wall, and an empty
+    profile -- and the artifact committed to none of them, so the next reader
+    had to guess. (A hard-coded "the runner has no browser" diagnosis was the
+    guess; the ubuntu-24.04 runner image ships Google Chrome 152, so it was
+    unsupported.) A silent degrade that folds three causes into one string is a
+    wrong-cause machine: name the cause in the artifact.
+
+    Never raises. Returns::
+
+        {"html": str,          # executed DOM, "" on any failure
+         "status": str,        # no_renderer | empty | login_wall | posts | html_no_posts
+         "chrome": str|None,   # resolved binary, for the log
+         "bytes": int,
+         "head": str}          # first 300 chars of the DOM -- evidence, never parsed
     """
     bin_ = chrome_bin()
     if not bin_:
-        return ""
+        return {"html": "", "status": "no_renderer", "chrome": None,
+                "bytes": 0, "head": ""}
     import tempfile
     prof = tempfile.mkdtemp(prefix="asig-")
     args = [bin_, "--headless=new", "--disable-gpu", "--no-sandbox",
             "--disable-dev-shm-usage", "--hide-scrollbars",
             "--user-agent=" + UA, f"--user-data-dir={prof}",
             f"--virtual-time-budget={budget_ms}", "--dump-dom", url]
+    html = ""
     try:
         r = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
-        return r.stdout or ""
+        html = r.stdout or ""
     except Exception:
-        return ""
+        html = ""
     finally:
         shutil.rmtree(prof, ignore_errors=True)
+    return {"html": html, "status": classify(html), "chrome": bin_,
+            "bytes": len(html), "head": html[:300]}
+
+
+def render(url, budget_ms=BUDGET_MS, timeout=180):
+    """Render a URL logged-out and return the executed DOM, or "" on any failure.
+
+    Back-compatible wrapper over render_detail(); callers that need the cause
+    should call render_detail() and report its "status".
+    """
+    return render_detail(url, budget_ms=budget_ms, timeout=timeout)["html"]
+
+
+def has_user_payload(html):
+    """True when the DOM carries the profile payload (username + name/bio +
+    follower_count/is_private). A login interstitial carries none of it, so this
+    is what separates "Instagram never showed us the profile" from "this is the
+    profile and it has nothing in it" -- including a PRIVATE one, which still
+    ships the payload with is_private=true."""
+    for blob in json_blobs(html):
+        out = []
+        _walk(blob, _is_user, out)
+        if out:
+            return True
+    return False
+
+
+def classify(html):
+    """What did the renderer ACTUALLY return? -> one of RENDER_STATUSES.
+
+    Distinguishes the causes an empty read used to fold together:
+      empty          -- the browser produced no DOM at all (start-up failure)
+      login_wall     -- Instagram's logged-out interstitial (the usual cloud-IP
+                        answer); the profile was never rendered
+      posts          -- a profile grid was rendered (this one can be anchored)
+      html_no_posts  -- the profile page rendered but has no readable posts
+                        (private or empty); the payload is present
+    """
+    if not (html or "").strip():
+        return "empty"
+    if posts_from_html(html) or img_alts(html):
+        return "posts"
+    if not has_user_payload(html) and _LOGIN_WALL.search(html):
+        return "login_wall"
+    return "html_no_posts"
 
 
 def render_handle(handle, budget_ms=BUDGET_MS):
+    return render_handle_detail(handle, budget_ms=budget_ms)["html"]
+
+
+def render_handle_detail(handle, budget_ms=BUDGET_MS):
+    """render_detail() for a profile handle, with the handle validated first.
+
+    An unvalidated handle is a wrong-subject machine (a 1-char handle is a real
+    stranger's account), so it never reaches the network: a rejected handle
+    reports ``bad_handle`` rather than an empty read.
+    """
     handle = (handle or "").lstrip("@").strip()
     if not re.fullmatch(r"[A-Za-z0-9_.]{2,}", handle or ""):
-        return ""
-    return render(f"https://www.instagram.com/{handle}/", budget_ms=budget_ms)
+        return {"html": "", "status": "bad_handle", "chrome": None,
+                "bytes": 0, "head": ""}
+    return render_detail(f"https://www.instagram.com/{handle}/", budget_ms=budget_ms)
 
 
 # ------------------------------------------------------------- pure parsing
@@ -235,7 +328,7 @@ def posts_from_html(html):
     return posts
 
 
-def ingest(html, handle):
+def ingest(html, handle, render_status=None):
     """Rendered DOM -> what is actually readable. Unknown stays null/empty."""
     handle = (handle or "").lstrip("@").strip()
     meta = meta_map(html)
@@ -279,9 +372,30 @@ def ingest(html, handle):
             display = m.group("name").strip()
 
     if not posts and not alts:
-        notes.append("no rendered posts or alts (private handle, empty profile, "
-                     "or a shell that never executed) -- nothing to anchor beyond "
-                     "the profile meta; do NOT invent a line")
+        # Name the CAUSE. All four used to be one string, which made "our
+        # runner is walled off" read as "the customer's profile is private".
+        cause = render_status or classify(html)
+        if cause == "no_renderer":
+            notes.append("NO RENDERER on this host (chrome_bin() found no "
+                         "Chrome/Chromium) -- the profile was never opened; "
+                         "nothing to anchor; do NOT invent a line")
+        elif cause == "login_wall":
+            notes.append("Instagram served a LOGIN INTERSTITIAL to this host's "
+                         "IP -- the profile was never rendered, so nothing was "
+                         "read; do NOT invent a line")
+        elif cause == "empty":
+            notes.append("the renderer returned an EMPTY DOM (browser failed to "
+                         "start, or the URL was refused) -- nothing was read; "
+                         "do NOT invent a line")
+        elif cause == "bad_handle":
+            notes.append("the handle did not pass validation, so it was never "
+                         "requested -- nothing was read; do NOT invent a line")
+        else:
+            notes.append("real DOM but no posts or alts were readable (private "
+                         "handle or empty profile) -- nothing to anchor beyond "
+                         "the profile meta; do NOT invent a line")
+        if render_status:
+            notes.append("render_status=" + str(render_status))
 
     return {
         "handle": (u.get("username") or handle),
@@ -295,6 +409,7 @@ def ingest(html, handle):
         "alt_texts": alts,
         "alt_lines": alt_lines,
         "posts_seen": len(posts),
+        "render_status": render_status,
         "notes": notes,
     }
 
@@ -356,56 +471,114 @@ def _selftest():
                                             for a in info["alt_texts"])),
         ("no post codes duplicated", info["posts_seen"] == 1),
     ]
+    # Every check is APPENDED to `checks` and counted by the single loop at the
+    # bottom. Counting before the appends once made this banner report
+    # "13/33 passed" with an empty failure list -- a green-looking summary of
+    # checks that were never executed.
+
+    # anchor rules
+    a, s = pick_anchor(info["captions"], info["alt_lines"], "")
+    checks.append(("anchor picks the verbatim caption first",
+                   a == "I'm just gonna fuckin do it" and s == "ig-caption"))
+
+    a2, s2 = pick_anchor([], ["Photo by David Johnson in Tampa, Florida."], "My best friend of 20 years")
+    checks.append(("bare 'Photo by' alt rejected; brief used instead",
+                   a2 == "My best friend of 20 years" and s2 == "brief"))
+
+    a3, s3 = pick_anchor([], [], "")
+    checks.append(("no evidence -> (None, None), never an invented line",
+                   a3 is None and s3 is None))
+
+    # F1 negative control: the old invented string must not be producible
+    checks.append(("F1 invented anchor string absent",
+                   "is one of the real ones" not in json.dumps([a, a2, a3, info])))
+
+    # count-line detector
+    checks.append(("count-line detector",
+                   is_count_line("984 Followers, 1,010 Following, 34 Posts - See Instagram "
+                                 "photos and videos from David Johnson (#olafjohnsoniv)")))
+    checks.append(("count-line detector false positive",
+                   not is_count_line("Rhea is a big fan of gator nuggets #friends")))
+
+    # empty DOM -> empty read, no crash, no invention
+    e = ingest("", "ghost")
+    checks.append(("empty DOM -> empty read",
+                   e["captions"] == [] and e["bio"] is None and e["display_name"] is None))
+
+    # ---- the renderer CAUSE fence (wrong-cause machine, fixed 2026-09-17) ----
+    checks.append(("RENDER_STATUSES vocabulary",
+                   RENDER_STATUSES == ("no_renderer", "empty", "login_wall",
+                                       "posts", "html_no_posts")))
+    checks.append(("classify: empty DOM -> 'empty'", classify("") == "empty"))
+    checks.append(("classify: rendered grid -> 'posts'", classify(_FIXTURE) == "posts"))
+    checks.append(("classify: login interstitial -> 'login_wall'",
+                   classify('<html><body><div>Log in to Instagram</div>'
+                            '<a href="/accounts/login/?next=/x/">go</a></body></html>')
+                   == "login_wall"))
+    checks.append(("classify: real DOM, no posts -> 'html_no_posts'",
+                   classify("<html><body><h1>Hello there friend Hello there friend "
+                            "Hello there friend</h1></body></html>") == "html_no_posts"))
+    # A PRIVATE profile still ships the user payload, so it must NOT be labelled
+    # a login wall (the label is the whole point of this fence).
+    _PRIVATE = ('<html><body><a href="/accounts/login/">Log in</a>'
+                '<script type="application/json">{"user":{"username":"shy","full_name":'
+                '"Shy Person","biography":"","follower_count":3,"is_private":true,'
+                '"edge_owner_to_timeline_media":{"edges":[]}}}</script></body></html>')
+    checks.append(("classify: private profile (payload present) -> 'html_no_posts', "
+                   "not 'login_wall'", classify(_PRIVATE) == "html_no_posts"))
+    checks.append(("has_user_payload: interstitial carries no profile payload",
+                   not has_user_payload('<html><body>Log in to Instagram</body></html>')
+                   and has_user_payload(_FIXTURE)))
+
+    # a missing binary must report a missing BINARY, not "saw nothing"
+    _orig_bin = chrome_bin
+    globals()["chrome_bin"] = lambda: None
+    try:
+        rd = render_detail("https://www.instagram.com/whoever/")
+    finally:
+        globals()["chrome_bin"] = _orig_bin
+    checks.append(("no renderer -> status 'no_renderer' with chrome=None and html=''",
+                   rd["status"] == "no_renderer" and rd["html"] == ""
+                   and rd["chrome"] is None))
+
+    # CHROME_BIN is honoured first, and a bogus one never wins
+    os.environ["CHROME_BIN"] = sys.executable
+    try:
+        checks.append(("CHROME_BIN honoured by chrome_bin()",
+                       chrome_bin() == sys.executable))
+    finally:
+        os.environ.pop("CHROME_BIN", None)
+    os.environ["CHROME_BIN"] = "/definitely/not/a/binary"
+    try:
+        checks.append(("bogus CHROME_BIN is not returned (existence-checked)",
+                       chrome_bin() != "/definitely/not/a/binary"))
+    finally:
+        os.environ.pop("CHROME_BIN", None)
+
+    # an invalid handle is refused BEFORE the network (wrong-subject fence)
+    checks.append(("bad handle -> 'bad_handle' without rendering",
+                   render_handle_detail("o")["status"] == "bad_handle"
+                   and render_handle_detail("a b")["status"] == "bad_handle"))
+
+    # the ingest note names the cause and the status rides the result
+    c1 = ingest("", "ghost", render_status="login_wall")
+    checks.append(("ingest note names the LOGIN WALL",
+                   any("LOGIN INTERSTITIAL" in n for n in c1["notes"])))
+    c2 = ingest("", "ghost", render_status="no_renderer")
+    checks.append(("ingest note names the missing RENDERER",
+                   any("NO RENDERER" in n for n in c2["notes"])))
+    checks.append(("render_status carried on the ingest result",
+                   c1["render_status"] == "login_wall"))
+    checks.append(("the three causes no longer share one string",
+                   "no rendered posts or alts" not in json.dumps(c1["notes"])))
+
     for name, cond in checks:
         if cond:
             ok += 1
         else:
             bad.append(name)
 
-    # anchor rules
-    a, s = pick_anchor(info["captions"], info["alt_lines"], "")
-    if a == "I'm just gonna fuckin do it" and s == "ig-caption":
-        ok += 1
-    else:
-        bad.append("anchor picks the verbatim caption first")
-
-    a2, s2 = pick_anchor([], ["Photo by David Johnson in Tampa, Florida."], "My best friend of 20 years")
-    if a2 == "My best friend of 20 years" and s2 == "brief":
-        ok += 1
-    else:
-        bad.append("bare 'Photo by' alt rejected; brief used instead")
-
-    a3, s3 = pick_anchor([], [], "")
-    if a3 is None and s3 is None:
-        ok += 1
-    else:
-        bad.append("no evidence -> (None, None), never an invented line")
-
-    # F1 negative control: the old invented string must not be producible
-    if "is one of the real ones" not in json.dumps([a, a2, a3, info]):
-        ok += 1
-    else:
-        bad.append("F1 invented anchor string present")
-
-    # count-line detector
-    if is_count_line("984 Followers, 1,010 Following, 34 Posts - See Instagram "
-                     "photos and videos from David Johnson (#olafjohnsoniv)"):
-        ok += 1
-    else:
-        bad.append("count-line detector")
-    if not is_count_line("Rhea is a big fan of gator nuggets #friends"):
-        ok += 1
-    else:
-        bad.append("count-line detector false positive")
-
-    # empty DOM -> empty read, no crash, no invention
-    e = ingest("", "ghost")
-    if e["captions"] == [] and e["bio"] is None and e["display_name"] is None:
-        ok += 1
-    else:
-        bad.append("empty DOM -> empty read")
-
-    total = len(checks) + 7
+    total = len(checks)
     print(f"ig_ingest selftest: {ok}/{total} passed"
           + ("" if not bad else "  FAILED: " + "; ".join(bad)))
     return 0 if not bad else 1
