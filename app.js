@@ -44,7 +44,7 @@ $('#addProfile').onclick=()=>{const open=$('#secondProfile').hidden;$('#secondPr
 for(const selector of ['#instagram1','#instagram2']){$(selector).addEventListener('input',e=>{const f=e.target;f.setCustomValidity('');if(!f.value.trim())return;try{const u=new URL(f.value);if(u.protocol!=='https:'||!['instagram.com','www.instagram.com'].includes(u.hostname.toLowerCase())||u.pathname==='/'||/^\/(p|reel|reels|stories)\//.test(u.pathname))f.setCustomValidity('Paste an Instagram profile URL, not a post link.')}catch{f.setCustomValidity('Paste a complete Instagram profile URL.')}})}
 
 const intakeFiles={screenshot:[],photos:[]};
-const fileConfig={screenshot:{input:'gridShot',status:'shotName',preview:'shotPreviews',limit:1},photos:{input:'photoUpload',status:'photoCount',preview:'photoPreviews',limit:10}};
+const fileConfig={screenshot:{input:'gridShot',status:'shotName',preview:'shotPreviews',limit:2},photos:{input:'photoUpload',status:'photoCount',preview:'photoPreviews',limit:10}};
 const fileUrls={screenshot:[],photos:[]};
 function activeLane(){return document.querySelector('[name="intake_lane"]:checked').value}
 function pickLane(n){
@@ -73,7 +73,7 @@ for(const kind of ['screenshot','photos']){
  const c=fileConfig[kind],input=document.getElementById(c.input);
  input.addEventListener('change',()=>{
   const selected=Array.from(input.files);let error='';
-  if(selected.length>c.limit)error='Choose at most '+c.limit+' '+(kind==='photos'?'photos.':'screenshot.');
+  if(selected.length>c.limit)error='Choose at most '+c.limit+' '+(kind==='photos'?'photos.':'screenshot'+(c.limit>1?'s':'')+'.');
   else if(selected.some(f=>!['image/jpeg','image/png','image/webp'].includes(f.type)))error='Use JPG, PNG or WebP images.';
   else if(selected.some(f=>f.size===0||f.size>15*1024*1024))error='Each image must contain data and be no larger than 15 MB.';
   else if(selected.reduce((total,f)=>total+f.size,0)>50*1024*1024)error='Keep the selected images under 50 MB in total.';
@@ -116,8 +116,8 @@ function payChoicePanel(values){
  box.innerHTML='<span class="eyebrow">LAST STEP</span><h2>Lock in your song — $5</h2>'
  +'<div class="pay-grid">'
  +'<div class="pay-card"><b>Pay with Card</b><p class="small">Apple Pay · Link · instant</p><a class="pay-link" href="https://buy.stripe.com/6oU5kE4LT9Md16lbzu14402" target="_blank" rel="noopener">Pay with Card</a></div>'
- +'<div class="pay-card"><b>Pay with Cash App</b><img class="pay-qr" src="assets/cashapp_qr_clean.jpg" alt="Cash App QR" width="220" height="220"><a class="pay-link" href="https://cash.app/$Gabrielmoneys" target="_blank" rel="noopener">Pay with Cash App</a></div>'
- +'<div class="pay-card"><b>Pay with Venmo</b><img class="pay-qr" src="assets/venmo_qr_clean.jpg" alt="Venmo QR" width="220" height="220"><a class="pay-link" href="https://venmo.com/Gabriel-Tao" target="_blank" rel="noopener">Pay with Venmo</a></div>'
+ +'<div class="pay-card"><b>Pay with Cash App</b><img class="pay-qr" src="assets/cashapp_qr_clean.jpg" alt="Cash App QR" width="220" height="220"><a class="pay-link" href="https://cash.app/$Gabrielmoneys/5" target="_blank" rel="noopener">Pay with Cash App</a></div>'
+ +'<div class="pay-card"><b>Pay with Venmo</b><img class="pay-qr" src="assets/venmo_qr_clean.jpg" alt="Venmo QR" width="220" height="220"><a class="pay-link" href="https://venmo.com/?txn=pay&recipients=Gabriel-Tao&amount=5.00&note=AnthemSmith%20song" target="_blank" rel="noopener">Pay with Venmo</a></div>'
  +'</div>'
  +'<button class="primary" id="paidDone">I\'ve paid — forge my song</button>'
  +'<p class="small">Paying opens a secure tab — come back here and your song plays on this page when it\'s ready.</p>';
@@ -126,7 +126,16 @@ function payChoicePanel(values){
 };
 async function submitInstant(){
  const values=Object.fromEntries(Array.from(new FormData($('#songForm'))).filter(([,v])=>typeof v==='string'));
- if(!values.instagram1){$('#brief').hidden=false;$('#brief').innerHTML='<p class="small">Paste your Instagram link first — that is the one thing we need.</p>';return}
+ const lane=activeLane();
+ const hasLink=!!values.instagram1;
+ const hasFiles=selectedIntakeFiles().length>0;
+ if(!hasLink&&!hasFiles){$('#brief').hidden=false;$('#brief').innerHTML='<p class="small">Give us a way in — an Instagram link, a grid screenshot, or up to 10 photos. Any one works.</p>';return}
+ // fold the active lane's story text into details so the forge gets the full brief
+ const laneText=(values['laneDetails'+lane]||'').trim();
+ const parts=[(values.details||'').trim(),laneText].filter(Boolean);
+ values.details=parts.join('\n\n');
+ values.intake=lane===0?'link':(lane===1?'screenshot':'photos');
+ values.file_count=hasFiles?String(selectedIntakeFiles().length):'0';
  // email dropped (Gabe 09-16): delivery is on-page download, no inbox needed
  payChoicePanel(values);
 }
