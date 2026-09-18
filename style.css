@@ -53,3 +53,4 @@ html{scroll-behavior:smooth;scroll-padding-top:24px}.nav-links{display:flex;alig
 .pay-card b{font-size:1.05rem;margin-bottom:4px}
 
 .pay-link{margin-top:auto}
+.delivery-options{display:flex;gap:24px;flex-wrap:wrap;margin-bottom:18px}.delivery-options label{display:flex;align-items:center;gap:8px}.delivery-options input{width:auto}#brief{margin-top:24px;padding-top:24px;border-top:1px solid var(--line)}#brief .primary,#brief .checkout-link{display:inline-block;margin-top:16px;margin-right:12px;text-decoration:none}#brief audio{display:block;width:100%;margin:20px 0}#brief label{display:block;margin-top:20px}#brief textarea{width:100%}#checkoutButton:disabled{opacity:.65;cursor:wait}

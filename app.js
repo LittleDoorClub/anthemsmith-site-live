@@ -32,7 +32,7 @@ $('#site').innerHTML=`<nav><a class="brand" href="#" aria-label="AnthemSmith hom
 <section class="how-story" id="how"><div class="how-copy"><span class="eyebrow">MORE THAN A SINGLE PHOTO</span><h2>We find the story<br>between the posts.</h2><p>You show us the moments — the photos you pick, the captions you paste, the links you share. What was really going on, who was there, the joke nobody else gets.</p><p>Hand us the pieces you want included. Together, they become a song that feels like you.</p></div><div class="lyric-recipe"><span class="eyebrow">FROM A POST TO A CHORUS · FICTIONAL EXAMPLE</span><div class="recipe-line"><span>THE CAPTION</span><p>“45. First shop with my name on the door.”</p></div><div class="recipe-line"><span>THE COMMENT</span><p>“Still wearing the boots from your first job.”</p></div><div class="recipe-song"><span>THE SONG</span><blockquote>Same old boots on a brand-new floor,<br>Forty-five years brought me to this door.</blockquote><small>Boom-bap Hip-hop · Female vocals</small></div></div></section>
 <div id="soundSlot"></div>
 <section class="input-ways" id="how-it-works"><span class="eyebrow">HOW IT WORKS</span><h2>Three ways in.<br>Any of them works.</h2><p class="lede">Pick whichever is easiest for you. You hand us the moments — we never go and take them. No passwords, no access to your account, nothing you have to unlock.</p><div class="ways"><article class="way"><span class="num">1</span><div class="art"><svg viewBox="0 0 260 150" width="100%" height="auto" role="img" aria-label="A public Instagram link being pasted"><rect x="8" y="26" width="180" height="34" rx="4" fill="#fff" stroke="#c6c5be" stroke-width="1.4"/><circle cx="28" cy="43" r="7" fill="none" stroke="#9d9c94" stroke-width="1.6"/><text x="44" y="48" font-family="DM Sans,sans-serif" font-size="13" fill="#66665e">instagram.com/…</text><path d="M196 43 h22" stroke="#d93127" stroke-width="2.6" stroke-linecap="round"/><path d="M212 37 l7 6 -7 6" fill="none" stroke="#d93127" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><g fill="#e6e3db" stroke="#c6c5be" stroke-width="1.2"><rect x="8" y="86" width="30" height="30" rx="2"/><rect x="42" y="86" width="30" height="30" rx="2"/><rect x="76" y="86" width="30" height="30" rx="2"/><rect x="110" y="86" width="30" height="30" rx="2"/></g><g fill="#9d9c94"><circle cx="23" cy="101" r="5"/><circle cx="57" cy="99" r="5"/><circle cx="91" cy="103" r="5"/><circle cx="125" cy="100" r="5"/></g><rect x="152" y="86" width="92" height="30" rx="3" fill="none" stroke="#d93127" stroke-width="1.6" stroke-dasharray="4 4"/><text x="198" y="106" font-family="DM Sans,sans-serif" font-size="11" fill="#d93127" text-anchor="middle">public only</text></svg></div><h3>Drop your link</h3><p>Share your public profile. Paste any captions or inside jokes you want us to include, especially if a post needs context.</p><span class="best">PUBLIC PROFILES</span></article><article class="way"><span class="num">2</span><div class="art"><svg viewBox="0 0 260 150" width="100%" height="auto" role="img" aria-label="A phone showing a screenshot of an Instagram grid"><rect x="96" y="8" width="76" height="134" rx="10" fill="#fff" stroke="#20211e" stroke-width="2"/><rect x="104" y="20" width="60" height="106" rx="3" fill="#f4f2ed" stroke="#c6c5be" stroke-width="1"/><g fill="#dcd9d1"><rect x="106" y="22" width="18" height="18"/><rect x="125" y="22" width="18" height="18"/><rect x="144" y="22" width="18" height="18"/><rect x="106" y="41" width="18" height="18"/><rect x="125" y="41" width="18" height="18"/><rect x="144" y="41" width="18" height="18"/><rect x="106" y="60" width="18" height="18"/><rect x="125" y="60" width="18" height="18"/><rect x="144" y="60" width="18" height="18"/></g><rect x="130" y="14" width="12" height="3" rx="1.5" fill="#20211e"/><g stroke="#d93127" stroke-width="2.4" fill="none" stroke-linecap="round"><path d="M62 20 h-10 v12"/><path d="M206 20 h10 v12"/><path d="M62 130 h-10 v-12"/><path d="M206 130 h10 v-12"/></g><text x="40" y="80" font-family="DM Sans,sans-serif" font-size="11" fill="#66665e" text-anchor="middle" transform="rotate(-90 40 80)">screenshot</text></svg></div><h3>Screenshot your grid</h3><p>Already have your feed open? Screenshot the grid and send it. Fastest option if you are on your phone right now.</p><span class="best">FASTEST</span></article><article class="way"><span class="num">3</span><div class="art"><svg viewBox="0 0 260 150" width="100%" height="auto" role="img" aria-label="Ten photo tiles being uploaded"><g fill="none" stroke="#c6c5be" stroke-width="1.4"><g><rect x="8" y="10" width="44" height="44" rx="3"/><rect x="58" y="10" width="44" height="44" rx="3"/><rect x="108" y="10" width="44" height="44" rx="3"/><rect x="158" y="10" width="44" height="44" rx="3"/><rect x="208" y="10" width="44" height="44" rx="3"/><rect x="8" y="60" width="44" height="44" rx="3"/><rect x="58" y="60" width="44" height="44" rx="3"/><rect x="108" y="60" width="44" height="44" rx="3"/><rect x="158" y="60" width="44" height="44" rx="3"/><rect x="208" y="60" width="44" height="44" rx="3"/></g></g><g fill="#e6e3db"><rect x="9" y="11" width="42" height="42" rx="3"/><rect x="59" y="11" width="42" height="42" rx="3"/><rect x="109" y="11" width="42" height="42" rx="3"/><rect x="59" y="61" width="42" height="42" rx="3"/><rect x="159" y="61" width="42" height="42" rx="3"/></g><g fill="#9d9c94"><circle cx="30" cy="30" r="7"/><circle cx="80" cy="26" r="7"/><circle cx="130" cy="32" r="7"/><circle cx="80" cy="82" r="7"/><circle cx="180" cy="78" r="7"/></g><g stroke="#d93127" stroke-width="2.6" fill="none" stroke-linecap="round"><path d="M230 34 v22 M230 34 l-8 9 M230 34 l8 9"/></g><text x="230" y="76" font-family="Space Grotesk,sans-serif" font-size="12" font-weight="700" fill="#d93127" text-anchor="middle">10</text></svg></div><h3>Show us the moments</h3><p>Upload up to ten photos — the ones that actually mean something. Straight from your camera roll, no account needed.</p><span class="best">WORKS FOR EVERYONE</span></article></div><div class="recover"><div class="field"><b>Paste the captions, or just tell us about these</b>The bit only you know — who is in it, what was actually going on, the joke nobody else gets…</div><div class="why"><strong>Optional, but it is the good stuff.</strong> Photos give us the pictures; this gives us the words. It is where the chorus comes from — and it needs no account and no link.</div></div><p class="ways-note">Nothing here asks for your password or access to your account. If your Instagram is private, that is completely fine — use photos or a screenshot instead.</p></section><section class="private-story"><div><span class="eyebrow">PRIVATE ACCOUNT? YOU’RE INVITED.</span><h2>Let us into your world.</h2><p>Use photos or a grid screenshot, then add your favorite captions and inside jokes. You can also message @AnthemSmith for help.</p></div><a class="instagram-button" href="https://www.instagram.com/anthemsmith/" target="_blank" rel="noopener">Find @AnthemSmith ↗</a></section>
-<section class="closing"><span class="eyebrow">FOR YOU. FOR THEM. FOR THE GROUP CHAT.</span><h2>The soundtrack to your story.</h2><button class="primary" data-create="0">Start my song — $5</button></section><footer><a class="brand" href="#"><span class="brand-icon"><img src="assets/anthemsmith-mark.webp" alt=""></span><span class="brand-name">🎶 AnthemSmith🎵🔨</span></a><a class="footer-ig" href="https://www.instagram.com/anthemsmith/" target="_blank" rel="noopener">instagram.com/anthemsmith</a><span>Song requests are reviewed before payment. Songs are AI-generated from a custom brief and lyrics. <a href="terms.html">Terms</a> · <a href="privacy.html">Privacy</a></span></footer>`;$('#soundSlot').replaceWith(builder)}
+<section class="closing"><span class="eyebrow">FOR YOU. FOR THEM. FOR THE GROUP CHAT.</span><h2>The soundtrack to your story.</h2><button class="primary" data-create="0">Start my song — $5</button></section><footer><a class="brand" href="#"><span class="brand-icon"><img src="assets/anthemsmith-mark.webp" alt=""></span><span class="brand-name">🎶 AnthemSmith🎵🔨</span></a><a class="footer-ig" href="https://www.instagram.com/anthemsmith/" target="_blank" rel="noopener">instagram.com/anthemsmith</a><span>Choose text or email for order updates and your song. Songs are AI-generated from a custom brief and lyrics. <a href="terms.html">Terms</a> · <a href="privacy.html">Privacy</a></span></footer>`;$('#soundSlot').replaceWith(builder)}
 function moods(){const s=stories.find(s=>s.name===$('#categorySelect').value);$('#moodSelect').innerHTML=s.moods.map(x=>`<option>${x}</option>`).join('')}
 function openBuilder(i){$('#demo').close();$('#songForm').hidden=false;$('#brief').hidden=true;$('#categorySelect').value=stories[i].name;moods();builder.scrollIntoView({behavior:'smooth',block:'start'})}
 document.addEventListener('click',e=>{let b=e.target.closest('[data-create]');if(b){openBuilder(+b.dataset.create);return}b=e.target.closest('[data-demo]');if(b){activeStory=+b.dataset.demo;const s=stories[activeStory];$('#demoTitle').textContent=s.title;$('#demoPhoto').className='photo q'+s.image;$('#demoCaption').textContent=s.caption;$('#demoSample').innerHTML=sample(+b.dataset.demo);$('#demo').showModal()}if(e.target.closest('.close'))e.target.closest('dialog').close()});
@@ -90,126 +90,6 @@ function requestData(){
  return values;
 }
 function requestText(data){return JSON.stringify(data,null,1)}
-// ===== INSTANT FLOW: IG link -> Stripe $5 -> repo_dispatch -> forge -> play =====
-const GH_OWNER='LittleDoorClub',GH_REPO='anthemsmith-site-live';
-function orderStatusURL(id){return 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'.json'}
-function songURL(id){return 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'.mp3'}
-async function fireOrder(data){
- // Relay via ntfy (public topic, JSON body). The forge poller picks it up and
- // fires the GitHub dispatch with the repo secret server-side.
- // FIX 09-17 (AS-ORDERID): guarantee a STABLE order id on EVERY call path. Before this,
- // request_id was minted only inside the uncalled requestData(), so data.request_id was
- // undefined here; JSON.stringify drops undefined keys, the relay message carried no
- // order_id, and the poller's `if not oid: continue` silently skipped every real order.
- // Minting here (synchronously, before the first await) also seeds the same id into
- // sessionStorage on the awaiting_payment fire, so the ?paid=1 resume cannot double-order.
- if(!data.request_id)data.request_id='AS-'+Date.now().toString(36).toUpperCase();
- const ord={order_id:data.request_id,ig_url:data.instagram1||'',category:data.category||'My Story',mood:data.mood||'',voice:data.voice||'Surprise me',details:data.details||'',email:data.email||'',sms_to:data.sms_to||'',delivery:data.delivery||'sms',intake:data.intake||'link'};
- const r=await fetch('https://ntfy.sh/as-anthemsmith-orders-v1',{method:'POST',headers:{'Content-Type':'application/json','Title':'anthemsmith-order','X-Order-Id':data.request_id,'Tags':'anvil'},body:JSON.stringify(ord)});
- if(!r.ok)throw new Error('relay '+r.status);
- return data.request_id;
-}
-function watchOrder(id,box,tries){
- box.innerHTML='<p class="small">Forging your song... this takes 3-5 minutes. Keep this tab open.</p><div class="progress"><div class="progress-bar" style="width:5%"></div></div>';
- let n=0;const timer=setInterval(async()=>{
-  n++;const pct=Math.min(92,5+n*3);const bar=box.querySelector('.progress-bar');if(bar)bar.style.width=pct+'%';
-  try{const r=await fetch(orderStatusURL(id)+'?t='+Date.now());let delivered=false;if(r.ok){const d=await r.json().catch(()=>null);delivered=!d||!d.status||d.status==='delivered';}if(delivered){clearInterval(timer);box.innerHTML='<h3>Your song is ready. 🎉</h3><audio controls autoplay src="'+songURL(id)+'"></audio><p class="small">Love it? Add another song for <b>$3</b> — <a href="https://buy.stripe.com/00w9AUbah8I9cP38ni14403" target="_blank" rel="noopener">grab the $3 follow-up</a>, come back, and hit the button again with new photos.</p><p class="small"><a class="instagram-button" download href="'+songURL(id)+'">Download your song</a> &nbsp; <a class="text-button" href="https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'-full.mp3" download>Full version</a></p>';}
-   else if(n>(tries||90)){clearInterval(timer);box.innerHTML='<p class="small">Still forging — check back in a few minutes at this page, or contact us with your order ID.</p>';}
-  }catch(e){}
- },4000);
-}
-function payChoicePanel(values){
- // FIX 09-17: fire the order relay THE MOMENT the pay panel opens, tagged awaiting_payment.
- // If the customer never comes back (close tab, stuck on Stripe), the order+contact still reaches the forge.
- values.paid_status='awaiting_payment';
- fireOrder(values).catch(()=>{ /* relay retry happens on paidDone or resume */ });
- const box=$('#brief');box.hidden=false;
- box.innerHTML='<span class="eyebrow">LAST STEP</span><h2>Lock in your song — $5</h2>'
- +'<div class="pay-grid">'
- +'<div class="pay-card"><b>Pay with Card</b><p class="small">Apple Pay · Link · instant</p><a class="pay-link" href="https://buy.stripe.com/6oU5kE4LT9Md16lbzu14402?success_url=http%3A%2F%2Fanthemsmith.com%2F%3Fpaid%3D1" target="_blank" rel="noopener">Pay with Card</a></div>'
- +'<div class="pay-card"><b>Pay with Cash App</b><img class="pay-qr" src="assets/cashapp_qr_clean.jpg" alt="Cash App QR" width="220" height="220"><a class="pay-link" href="https://cash.app/$Gabrielmoneys/5" target="_blank" rel="noopener">Pay with Cash App</a></div>'
- +'<div class="pay-card"><b>Pay with Venmo</b><img class="pay-qr" src="assets/venmo_qr_clean.jpg" alt="Venmo QR" width="220" height="220"><a class="pay-link" href="https://venmo.com/?txn=pay&recipients=Gabriel-Tao&amount=5.00&note=AnthemSmith%20song" target="_blank" rel="noopener">Pay with Venmo</a></div>'
- +'</div>'
- +'<div class="delivery-block" style="margin:14px 0;padding:12px;border:1px solid #ddd;border-radius:10px">'
- +'<b>Get your song:</b> <label style="margin-right:10px"><input type="radio" name="delivery" value="sms" checked onchange="window.__renderDelivery()"> Text me the link</label>'
- +'<label><input type="radio" name="delivery" value="email" onchange="window.__renderDelivery()"> Email me the link</label>'
- +'<div id="deliveryFields" style="margin-top:8px"><input type="tel" id="deliveryPhone" placeholder="Your cell number — song lands by SMS" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px"></div>'
- +'</div>'
- +'<button class="primary" id="paidDone">I\'ve paid — forge my song</button>'
- +'<p class="small">Paying opens a secure tab — come back here and your song plays on this page when it\'s ready.</p>';
- const b=document.getElementById('paidDone');
- if(b)b.onclick=()=>{values.pay_method=document.querySelector('input[name="pay_method"]:checked')?.value||'card';
- const dMode=(document.querySelector('input[name="delivery"]:checked')||{}).value||'sms';
- if(dMode==='sms'){const ph=(document.getElementById('deliveryPhone')||{}).value||'';if(!ph.trim()){box.innerHTML='<p class="small">Add your cell number so we can text the song — or switch to email above.</p>';return}values.sms_to=ph.trim();}
- else{const em=(document.getElementById('deliveryEmail')||{}).value||'';if(!em.trim()||!em.includes('@')){box.innerHTML='<p class="small">Add your email so we can send the song — or switch to text above.</p>';return}values.email=em.trim();}
- values.delivery=dMode;
- try{sessionStorage.setItem('anthemsmith_order',JSON.stringify(values))}catch(e){}
- values.paid_status='paid_claimed';fireOrder(values).then(()=>watchOrder(values.request_id,box)).catch(e=>{box.innerHTML='<p class="small">Order failed to start: '+e.message+' — your payment is safe, contact us with ID '+values.request_id+'.</p>'})};
-};
-async function submitInstant(){
- const values=Object.fromEntries(Array.from(new FormData($('#songForm'))).filter(([,v])=>typeof v==='string'));
- const lane=activeLane();
- const hasLink=!!values.instagram1;
- const hasFiles=selectedIntakeFiles().length>0;
- if(!hasLink&&!hasFiles){$('#brief').hidden=false;$('#brief').innerHTML='<p class="small">Give us a way in — an Instagram link, a grid screenshot, or up to 10 photos. Any one works.</p>';return}
- // fold the active lane's story text into details so the forge gets the full brief
- const laneText=(values['laneDetails'+lane]||'').trim();
- const parts=[(values.details||'').trim(),laneText].filter(Boolean);
- values.details=parts.join('\n\n');
- values.intake=lane===0?'link':(lane===1?'screenshot':'photos');
- values.file_count=hasFiles?String(selectedIntakeFiles().length):'0';
- // email dropped (Gabe 09-16): delivery is on-page download, no inbox needed
- payChoicePanel(values);
-}
-function resumeAfterPayment(){
- const raw=sessionStorage.getItem('anthemsmith_order');if(!raw)return false;
- const data=JSON.parse(raw);sessionStorage.removeItem('anthemsmith_order');
- // Ask delivery here if the customer never picked one — never strand a paid song.
- if(!data.delivery || (!data.sms_to && !data.email)){
-  const box=$('#brief');box.hidden=false;
-  box.innerHTML='<span class="eyebrow">PAID ✓</span><h2>Where should your song go?</h2>'
-   +'<div style="margin:12px 0"><label style="margin-right:12px"><input type="radio" name="resDelivery" value="sms" checked onchange="window.__renderResFields()"> Text it to my phone</label>'
-   +'<label><input type="radio" name="resDelivery" value="email" onchange="window.__renderResFields()"> Email it</label></div>'
-   +'<div id="resFields"><input type="tel" id="resContact" placeholder="Your cell number" style="width:100%;max-width:340px;padding:10px;border:1px solid #ccc;border-radius:6px"></div>'
-   +'<button class="primary" id="resSend" style="margin-top:10px">Send my song</button>';
-  window.__renderResFields=function(){
-   const m=(document.querySelector('input[name="resDelivery"]:checked')||{}).value||'sms';
-   document.getElementById('resFields').innerHTML = m==='sms'
-    ? '<input type="tel" id="resContact" placeholder="Your cell number" style="width:100%;max-width:340px;padding:10px;border:1px solid #ccc;border-radius:6px">'
-    : '<input type="email" id="resContact" placeholder="you@email.com" style="width:100%;max-width:340px;padding:10px;border:1px solid #ccc;border-radius:6px">';
-  };
-  document.getElementById('resSend').onclick=()=>{
-   const m=(document.querySelector('input[name="resDelivery"]:checked')||{}).value||'sms';
-   const v=document.getElementById('resContact').value.trim();
-   if(!v){document.getElementById('resFields').style.borderColor='red';return}
-   data.delivery=m; if(m==='sms')data.sms_to=v; else data.email=v;
-   try{sessionStorage.setItem('anthemsmith_order',JSON.stringify(data))}catch(e){}
-   const box2=$('#brief');box2.innerHTML='<p class="small">Firing the forge...</p>';
-   fireOrder(data).then(()=>watchOrder(data.request_id,box2)).catch(e=>{box2.innerHTML='<p class="small">Order failed to start: '+e.message+' — contact us with ID '+data.request_id+'.</p>'});
-  };
-  return true;
- }
- values.paid_status='paid_stripe_return'; const box=$('#brief');box.hidden=false;box.innerHTML='<p class="small">Payment received. Firing the forge...</p>';
- fireOrder(data).then(()=>watchOrder(data.request_id,box)).catch(e=>{box.innerHTML='<p class="small">Order failed to start: '+e.message+' — your payment is safe, contact us with ID '+data.request_id+'.</p>'});
- return true;
-}
-window.addEventListener('load',()=>{
- const resume=()=>resumeAfterPayment();
- if(new URLSearchParams(location.search).get('paid')==='1'){resume();}
- else if(sessionStorage.getItem('anthemsmith_order')){
-  const box=$('#brief');if(!box)return;box.hidden=false;
-  box.innerHTML='<p class="small">Welcome back! Your song request is saved — <a href="#" id="resumeOrder">finish my order</a>.</p>';
-  const a=document.getElementById('resumeOrder');
-  if(a)a.onclick=(e)=>{e.preventDefault();resume();};
- }
-});
 
+// Checkout and recovery are implemented by order-client.js.
 pickLane(0);
-
-window.__renderDelivery=function(){
- const m=(document.querySelector('input[name="delivery"]:checked')||{}).value||'sms';
- const df=document.getElementById('deliveryFields');
- if(df)df.innerHTML = m==='sms'
-  ? '<input type="tel" id="deliveryPhone" placeholder="Your cell number — song lands by SMS" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px">'
-  : '<input type="email" id="deliveryEmail" placeholder="you@email.com — song lands in your inbox" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px">';
-};
