@@ -6,6 +6,42 @@ Anti-hallucination: only text visible on the public profile (bio + recent captio
 unknown facts stay null. No logged-in access anywhere."""
 import json, os, re, sys, time, hashlib, subprocess, urllib.request
 
+# ============================================================
+# PAYMENT GATE (top of forge — before ANY scrape/generation).
+# The relay poller forwards the order payload's paid field verbatim
+# as client_payload; the workflow exposes it to us as PAID_STATUS.
+# Accepted verified-payment markers are exactly the values app.js writes
+# on the paid/claimed code paths. Anything else (missing, empty, or the
+# pay-panel-open 'awaiting_payment') MUST NOT forge: a song that was never
+# paid for must not be generated, committed, or shipped.
+# ============================================================
+PAID_ACCEPTED = ("paid_claimed", "paid_stripe_return", "paid_verified", "paid")
+PAID_STATUS = (os.environ.get("PAID_STATUS") or "").strip().lower()
+
+def reject_unpaid(reason):
+    """Write the <OID>.failed.json signal and stop the run RED.
+    NEVER writes songs/<OID>.json: that is the DELIVERED signal the
+    customer page polls, and writing it for an unpaid order would fake
+    'your song is ready' AND permanently block the retry via the relay
+    poller's claim_order() delivered-check."""
+    oid = os.environ.get("ORDER_ID", "UNKNOWN")
+    out = "songs"
+    os.makedirs(out, exist_ok=True)
+    json.dump({"order_id": oid, "status": "failed", "reason": reason},
+              open(f"{out}/{oid}.failed.json", "w"))
+    print("PAYMENT-GATE REJECTED", oid, "paid_status=%r" % PAID_STATUS, flush=True)
+    sys.exit(3)
+
+if os.environ.get("AS_FORGE_OVERRIDE") == "1":
+    print("PAYMENT-GATE overridden (manual forge)", flush=True)
+elif PAID_STATUS not in PAID_ACCEPTED:
+    reject_unpaid("no verified payment marker (paid_status=%r; accepted=%s)"
+                  % (PAID_STATUS, ",".join(PAID_ACCEPTED)))
+
+if os.environ.get("AS_PAYMENT_GATE_TEST") == "1":
+    print("PAYMENT-GATE ACCEPTED", os.environ.get("ORDER_ID"), "paid_status=%r" % PAID_STATUS, flush=True)
+    sys.exit(0)
+
 OUT = "songs"
 os.makedirs(OUT, exist_ok=True)
 OID = os.environ["ORDER_ID"]

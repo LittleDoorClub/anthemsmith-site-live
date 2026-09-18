@@ -139,6 +139,7 @@ jobs:
           DELIVERY: ${{ github.event.client_payload.delivery }}
           SMS_TO: ${{ github.event.client_payload.sms_to }}
           EMAIL: ${{ github.event.client_payload.email }}
+          PAID_STATUS: ${{ github.event.client_payload.paid_status }}
         run: python scripts/forge_order.py
 
       - name: Commit the delivered song

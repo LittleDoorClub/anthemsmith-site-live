@@ -43,6 +43,29 @@ render();onePlayerLaw();moods();
 $('#addProfile').onclick=()=>{const open=$('#secondProfile').hidden;$('#secondProfile').hidden=!open;$('#instagram2').disabled=!open;$('#addProfile').textContent=open?'− Remove second Instagram':'+ Add a second Instagram';if(open)$('#instagram2').focus()};
 for(const selector of ['#instagram1','#instagram2']){$(selector).addEventListener('input',e=>{const f=e.target;f.setCustomValidity('');if(!f.value.trim())return;try{const u=new URL(f.value);if(u.protocol!=='https:'||!['instagram.com','www.instagram.com'].includes(u.hostname.toLowerCase())||u.pathname==='/'||/^\/(p|reel|reels|stories)\//.test(u.pathname))f.setCustomValidity('Paste an Instagram profile URL, not a post link.')}catch{f.setCustomValidity('Paste a complete Instagram profile URL.')}})}
 
+// ===== DELIVERY VALIDATION — exactly one valid contact, enforced at submit =====
+function normalizePhone(raw){
+ raw=String(raw||'').trim();
+ let d=raw.replace(/[^\d]/g,'');
+ if(!d)return '';
+ if(!raw.includes('+')&&d.length<=10)d='1'+d;      // bare US/CA number -> +1 country code
+ if(d.length<11||d.length>15)return '';             // E.164 width: cc(1-3)+subscriber
+ if(/^(0{2,}|1)$/.test(d))return '';                // no all-zero / lone country code
+ return '+'+d;
+}
+function normalizeEmail(raw){
+ const v=String(raw||'').trim().toLowerCase();
+ if(!v)return '';
+ const at=v.indexOf('@');
+ if(at<1)return '';                                 // no @, or empty local part
+ const dom=v.slice(at+1);
+ if(dom.includes('@'))return '';                    // single @ only
+ if(!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(dom))return ''; // domain needs a real TLD dot
+ return v;
+}
+function validateContact(mode,raw){
+ return mode==='sms'?{ok:!!normalizePhone(raw),value:normalizePhone(raw)}:{ok:!!normalizeEmail(raw),value:normalizeEmail(raw)};
+}
 const intakeFiles={screenshot:[],photos:[]};
 const fileConfig={screenshot:{input:'gridShot',status:'shotName',preview:'shotPreviews',limit:2},photos:{input:'photoUpload',status:'photoCount',preview:'photoPreviews',limit:10}};
 const fileUrls={screenshot:[],photos:[]};
@@ -104,7 +127,7 @@ async function fireOrder(data){
  // Minting here (synchronously, before the first await) also seeds the same id into
  // sessionStorage on the awaiting_payment fire, so the ?paid=1 resume cannot double-order.
  if(!data.request_id)data.request_id='AS-'+Date.now().toString(36).toUpperCase();
- const ord={order_id:data.request_id,ig_url:data.instagram1||'',category:data.category||'My Story',mood:data.mood||'',voice:data.voice||'Surprise me',details:data.details||'',email:data.email||'',sms_to:data.sms_to||'',delivery:data.delivery||'sms',intake:data.intake||'link'};
+const ord={order_id:data.request_id,ig_url:data.instagram1||'',category:data.category||'My Story',mood:data.mood||'',voice:data.voice||'Surprise me',details:data.details||'',email:data.email||'',sms_to:data.sms_to||'',delivery:data.delivery||'sms',intake:data.intake||'link',paid_status:data.paid_status||'awaiting_payment'};
  const r=await fetch('https://ntfy.sh/as-anthemsmith-orders-v1',{method:'POST',headers:{'Content-Type':'application/json','Title':'anthemsmith-order','X-Order-Id':data.request_id,'Tags':'anvil'},body:JSON.stringify(ord)});
  if(!r.ok)throw new Error('relay '+r.status);
  return data.request_id;
@@ -133,15 +156,15 @@ function payChoicePanel(values){
  +'<div class="delivery-block" style="margin:14px 0;padding:12px;border:1px solid #ddd;border-radius:10px">'
  +'<b>Get your song:</b> <label style="margin-right:10px"><input type="radio" name="delivery" value="sms" checked onchange="window.__renderDelivery()"> Text me the link</label>'
  +'<label><input type="radio" name="delivery" value="email" onchange="window.__renderDelivery()"> Email me the link</label>'
- +'<div id="deliveryFields" style="margin-top:8px"><input type="tel" id="deliveryPhone" placeholder="Your cell number — song lands by SMS" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px"></div>'
+ +'<div id="deliveryFields" style="margin-top:8px"><input type="tel" id="deliveryPhone" name="sms_to" autocomplete="tel" placeholder="Your cell number — song lands by SMS" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px"></div>'
  +'</div>'
  +'<button class="primary" id="paidDone">I\'ve paid — forge my song</button>'
  +'<p class="small">Paying opens a secure tab — come back here and your song plays on this page when it\'s ready.</p>';
  const b=document.getElementById('paidDone');
  if(b)b.onclick=()=>{values.pay_method=document.querySelector('input[name="pay_method"]:checked')?.value||'card';
  const dMode=(document.querySelector('input[name="delivery"]:checked')||{}).value||'sms';
- if(dMode==='sms'){const ph=(document.getElementById('deliveryPhone')||{}).value||'';if(!ph.trim()){box.innerHTML='<p class="small">Add your cell number so we can text the song — or switch to email above.</p>';return}values.sms_to=ph.trim();}
- else{const em=(document.getElementById('deliveryEmail')||{}).value||'';if(!em.trim()||!em.includes('@')){box.innerHTML='<p class="small">Add your email so we can send the song — or switch to text above.</p>';return}values.email=em.trim();}
+ if(dMode==='sms'){const c=validateContact('sms',(document.getElementById('deliveryPhone')||{}).value||'');if(!c.ok){box.innerHTML='<p class="small">Add a valid cell number with country code (e.g. +1 212 555 1234) so we can text the song — or switch to email above.</p>';return}values.sms_to=c.value;values.email='';}
+ else{const c=validateContact('email',(document.getElementById('deliveryEmail')||{}).value||'');if(!c.ok){box.innerHTML='<p class="small">Add a valid email (name@example.com) so we can send the song — or switch to text above.</p>';return}values.email=c.value;values.sms_to='';}
  values.delivery=dMode;
  try{sessionStorage.setItem('anthemsmith_order',JSON.stringify(values))}catch(e){}
  values.paid_status='paid_claimed';fireOrder(values).then(()=>watchOrder(values.request_id,box)).catch(e=>{box.innerHTML='<p class="small">Order failed to start: '+e.message+' — your payment is safe, contact us with ID '+values.request_id+'.</p>'})};
@@ -170,19 +193,20 @@ function resumeAfterPayment(){
   box.innerHTML='<span class="eyebrow">PAID ✓</span><h2>Where should your song go?</h2>'
    +'<div style="margin:12px 0"><label style="margin-right:12px"><input type="radio" name="resDelivery" value="sms" checked onchange="window.__renderResFields()"> Text it to my phone</label>'
    +'<label><input type="radio" name="resDelivery" value="email" onchange="window.__renderResFields()"> Email it</label></div>'
-   +'<div id="resFields"><input type="tel" id="resContact" placeholder="Your cell number" style="width:100%;max-width:340px;padding:10px;border:1px solid #ccc;border-radius:6px"></div>'
+   +'<div id="resFields"><input type="tel" id="resContact" name="sms_to" autocomplete="tel" placeholder="Your cell number" style="width:100%;max-width:340px;padding:10px;border:1px solid #ccc;border-radius:6px"></div>'
    +'<button class="primary" id="resSend" style="margin-top:10px">Send my song</button>';
   window.__renderResFields=function(){
    const m=(document.querySelector('input[name="resDelivery"]:checked')||{}).value||'sms';
    document.getElementById('resFields').innerHTML = m==='sms'
-    ? '<input type="tel" id="resContact" placeholder="Your cell number" style="width:100%;max-width:340px;padding:10px;border:1px solid #ccc;border-radius:6px">'
-    : '<input type="email" id="resContact" placeholder="you@email.com" style="width:100%;max-width:340px;padding:10px;border:1px solid #ccc;border-radius:6px">';
+    ? '<input type="tel" id="resContact" name="sms_to" autocomplete="tel" placeholder="Your cell number" style="width:100%;max-width:340px;padding:10px;border:1px solid #ccc;border-radius:6px">'
+    : '<input type="email" id="resContact" name="email" autocomplete="email" placeholder="you@email.com" style="width:100%;max-width:340px;padding:10px;border:1px solid #ccc;border-radius:6px">';
   };
   document.getElementById('resSend').onclick=()=>{
    const m=(document.querySelector('input[name="resDelivery"]:checked')||{}).value||'sms';
-   const v=document.getElementById('resContact').value.trim();
-   if(!v){document.getElementById('resFields').style.borderColor='red';return}
-   data.delivery=m; if(m==='sms')data.sms_to=v; else data.email=v;
+   const raw=document.getElementById('resContact').value.trim();
+   const c=validateContact(m,raw);
+   if(!c.ok){document.getElementById('resFields').style.borderColor='red';return}
+   data.delivery=m; if(m==='sms'){data.sms_to=c.value;data.email='';} else {data.email=c.value;data.sms_to='';}
    try{sessionStorage.setItem('anthemsmith_order',JSON.stringify(data))}catch(e){}
    const box2=$('#brief');box2.innerHTML='<p class="small">Firing the forge...</p>';
    fireOrder(data).then(()=>watchOrder(data.request_id,box2)).catch(e=>{box2.innerHTML='<p class="small">Order failed to start: '+e.message+' — contact us with ID '+data.request_id+'.</p>'});
@@ -210,6 +234,6 @@ window.__renderDelivery=function(){
  const m=(document.querySelector('input[name="delivery"]:checked')||{}).value||'sms';
  const df=document.getElementById('deliveryFields');
  if(df)df.innerHTML = m==='sms'
-  ? '<input type="tel" id="deliveryPhone" placeholder="Your cell number — song lands by SMS" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px">'
-  : '<input type="email" id="deliveryEmail" placeholder="you@email.com — song lands in your inbox" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px">';
+  ? '<input type="tel" id="deliveryPhone" name="sms_to" autocomplete="tel" placeholder="Your cell number — song lands by SMS" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px">'
+  : '<input type="email" id="deliveryEmail" name="email" autocomplete="email" placeholder="you@email.com — song lands in your inbox" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px">';
 };
