@@ -15,7 +15,8 @@ jobs:
     # Pulls paid-order JSONs from the public ntfy relay and fires the
     # authenticated repository_dispatch server-side. Claim-file lock in the
     # repo prevents double-dispatch across pollers (409 race = lock held).
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    # Retired public relay: never claim or dispatch customer-supplied orders.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
@@ -112,7 +113,8 @@ jobs:
           PY
 
   forge:
-    if: github.event_name == 'repository_dispatch'
+    # Re-enable only after replacing this lane with the private verified queue.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -143,14 +145,16 @@ jobs:
         run: python scripts/forge_order.py
 
       - name: Commit the delivered song
+        env:
+          ORDER_ID: ${{ github.event.client_payload.order_id }}
         run: |
           git config user.name "anthemsmith-forge"
           git config user.email "forge@anthemsmith.com"
           git add songs/
-          git rm --cached --ignore-unmatch "songs/${{ github.event.client_payload.order_id }}.claim.json" || true
-          rm -f "songs/${{ github.event.client_payload.order_id }}.claim.json"
+          git rm --cached --ignore-unmatch "songs/${ORDER_ID}.claim.json" || true
+          rm -f "songs/${ORDER_ID}.claim.json"
           git add songs/
-          git commit -m "song ${{ github.event.client_payload.order_id }}" || echo "nothing to commit"
+          git commit -m "song ${ORDER_ID}" || echo "nothing to commit"
           git push
 
       - name: Deliver the song link (SMS / Email)
