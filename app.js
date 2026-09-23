@@ -136,7 +136,7 @@ function watchOrder(id,box,tries){
  box.innerHTML='<p class="small">Forging your song... this takes 3-5 minutes. Keep this tab open.</p><div class="progress"><div class="progress-bar" style="width:5%"></div></div>';
  let n=0;const timer=setInterval(async()=>{
   n++;const pct=Math.min(92,5+n*3);const bar=box.querySelector('.progress-bar');if(bar)bar.style.width=pct+'%';
-  try{const r=await fetch(orderStatusURL(id)+'?t='+Date.now());let delivered=false;if(r.ok){const d=await r.json().catch(()=>null);delivered=!d||!d.status||d.status==='delivered';}if(delivered){clearInterval(timer);box.innerHTML='<h3>Your song is ready. 🎉</h3><audio controls autoplay src="'+songURL(id)+'"></audio><p class="small">Love it? Add another song for <b>$3</b> — <a href="https://buy.stripe.com/00w9AUbah8I9cP38ni14403" target="_blank" rel="noopener">grab the $3 follow-up</a>, come back, and hit the button again with new photos.</p><p class="small"><a class="instagram-button" download href="'+songURL(id)+'">Download your song</a> &nbsp; <a class="text-button" href="https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'-full.mp3" download>Full version</a></p>';}
+  try{const r=await fetch(orderStatusURL(id)+'?t='+Date.now());let delivered=false;if(r.ok){const d=await r.json().catch(()=>null);const pd=d;if(!pd){delivered=false}else{delivered=!pd.status||pd.status==='delivered'};}if(delivered){clearInterval(timer);box.innerHTML='<h3>Your song is ready. 🎉</h3><audio controls autoplay src="'+songURL(id)+'"></audio><p class="small">Love it? Add another song for <b>$3</b> — <a href="https://buy.stripe.com/00w9AUbah8I9cP38ni14403" target="_blank" rel="noopener">grab the $3 follow-up</a>, come back, and hit the button again with new photos.</p><p class="small"><a class="instagram-button" download href="'+songURL(id)+'">Download your song</a> &nbsp; <a class="text-button" href="https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'-full.mp3" download>Full version</a></p>';}
    else if(n>(tries||90)){clearInterval(timer);box.innerHTML='<p class="small">Still forging — check back in a few minutes at this page, or contact us with your order ID.</p>';}
   }catch(e){}
  },4000);
@@ -144,7 +144,7 @@ function watchOrder(id,box,tries){
 function payChoicePanel(values){
  // FIX 09-17: fire the order relay THE MOMENT the pay panel opens, tagged awaiting_payment.
  // If the customer never comes back (close tab, stuck on Stripe), the order+contact still reaches the forge.
- values.paid_status='awaiting_payment';
+ values.paid_status='awaiting_payment';sessionStorage.setItem('anthemsmith_order',JSON.stringify(values));
  fireOrder(values).catch(()=>{ /* relay retry happens on paidDone or resume */ });
  const box=$('#brief');box.hidden=false;
  box.innerHTML='<span class="eyebrow">LAST STEP</span><h2>Lock in your song — $5</h2>'
@@ -213,7 +213,7 @@ function resumeAfterPayment(){
   };
   return true;
  }
- values.paid_status='paid_stripe_return'; const box=$('#brief');box.hidden=false;box.innerHTML='<p class="small">Payment received. Firing the forge...</p>';
+ data.paid_status='paid_stripe_return'; const box=$('#brief');box.hidden=false;box.innerHTML='<p class="small">Payment received. Firing the forge...</p>';
  fireOrder(data).then(()=>watchOrder(data.request_id,box)).catch(e=>{box.innerHTML='<p class="small">Order failed to start: '+e.message+' — your payment is safe, contact us with ID '+data.request_id+'.</p>'});
  return true;
 }
