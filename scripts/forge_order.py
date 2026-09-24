@@ -51,6 +51,7 @@ MOOD = os.environ.get("MOOD", "")
 VOICE = (os.environ.get("VOICE") or "Surprise me").strip()
 DETAILS = os.environ.get("DETAILS", "")
 MUAPI = os.environ["MUAPI_KEY"]
+REFERENCE_URL = (os.environ.get("REFERENCE_URL") or "").strip()
 
 def die(msg):
     # NEVER write <OID>.json on failure: songs/<OID>.json is the DELIVERED signal.
@@ -175,6 +176,8 @@ band = {"My Story": "boom-bap hip-hop, 92 BPM, dusty drums, warm bass, confident
         "Couples": "warm retro soul, 90 BPM, electric piano, buttery bass, intimate duet feel",
         "Friendship": "bouncy indie groove, 100 BPM, plucked riff, gang vocals, joyful male vocal"}
 style = band.get(CATEGORY, band["My Story"])
+if REFERENCE_URL:
+    style += f", reference track: {REFERENCE_URL}"
 if "hip" in corpus or "gym" in corpus: style = band["My Story"]
 
 # ---------- 4. LYRICS (heart anchor = most specific VISIBLE line; anti-cliche) ----------
@@ -323,6 +326,7 @@ meta = {"order_id": OID, "status": "delivered", "handle": handle, "category": CA
         "display_name": display_name or None,
         "duration_full": dur, "model": model_used,
         "heart_anchor": anchor, "heart_anchor_source": anchor_src,
+        "reference_url": REFERENCE_URL or None,
         "sources": {"bio": bool(bio), "captions_used": len(captions),
                     "alts_seen": len(alt_texts), "alt_lines_used": len(alt_lines),
                     "details": bool(DETAILS), "anchor_source": anchor_src,

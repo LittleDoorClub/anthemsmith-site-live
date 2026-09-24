@@ -139,10 +139,11 @@ jobs:
           MOOD: ${{ github.event.client_payload.mood }}
           VOICE: ${{ github.event.client_payload.voice }}
           DETAILS: ${{ github.event.client_payload.details }}
-          DELIVERY: ${{ github.event.client_payload.delivery }}
+          DELIVERY: ${{ github.event.client_payload.delivery || '' }}
           SMS_TO: ${{ github.event.client_payload.sms_to }}
           EMAIL: ${{ github.event.client_payload.email }}
           PAID_STATUS: ${{ github.event.client_payload.paid_status }}
+          REFERENCE_URL: ${{ github.event.client_payload.reference_url || '' }}
         run: python scripts/forge_order.py
 
       - name: Commit the delivered song
