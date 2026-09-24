@@ -131,7 +131,8 @@ jobs:
                           paid_status = str(o.get("paid_status", "")).strip().lower()
                           if claim_order(oid, force=(paid_status in PAID_ACCEPTED)):
                               dispatch_o = {k: v for k, v in o.items() if k != "intake"}
-                              payload = {"event_type": "anthemsmith-order", "client_payload": dispatch_o}
+                              # KEYCAP #48 (09-24): client_payload caps at 10 TOP-LEVEL keys; nest the order.
+                              payload = {"event_type": "anthemsmith-order", "client_payload": {"order": dispatch_o}}
                               st, d = gh_json("POST", f"{GH}/dispatches", payload)
                               print("dispatched", oid, st, "keys=%d paid=%s rank=%d" % (len(dispatch_o), paid_status, rank))
                           if len(seen) >= 5:
@@ -161,17 +162,17 @@ jobs:
       - name: "Forge song: scrape, measure, lyrics, Suno, QC"
         env:
           MUAPI_KEY: ${{ secrets.MUAPI_KEY }}
-          ORDER_ID: ${{ github.event.client_payload.order_id }}
-          IG_URL: ${{ github.event.client_payload.ig_url }}
-          CATEGORY: ${{ github.event.client_payload.category }}
-          MOOD: ${{ github.event.client_payload.mood }}
-          VOICE: ${{ github.event.client_payload.voice }}
-          DETAILS: ${{ github.event.client_payload.details }}
-          DELIVERY: ${{ github.event.client_payload.delivery || '' }}
-          SMS_TO: ${{ github.event.client_payload.sms_to }}
-          EMAIL: ${{ github.event.client_payload.email }}
-          PAID_STATUS: ${{ github.event.client_payload.paid_status }}
-          REFERENCE_URL: ${{ github.event.client_payload.reference_url || '' }}
+          ORDER_ID: ${{ github.event.client_payload.order.order_id }}
+          IG_URL: ${{ github.event.client_payload.order.ig_url }}
+          CATEGORY: ${{ github.event.client_payload.order.category }}
+          MOOD: ${{ github.event.client_payload.order.mood }}
+          VOICE: ${{ github.event.client_payload.order.voice }}
+          DETAILS: ${{ github.event.client_payload.order.details }}
+          DELIVERY: ${{ github.event.client_payload.order.delivery || '' }}
+          SMS_TO: ${{ github.event.client_payload.order.sms_to }}
+          EMAIL: ${{ github.event.client_payload.order.email }}
+          PAID_STATUS: ${{ github.event.client_payload.order.paid_status }}
+          REFERENCE_URL: ${{ github.event.client_payload.order.reference_url || '' }}
         run: python scripts/forge_order.py
 
       - name: Commit the delivered song and delivery status
@@ -180,14 +181,14 @@ jobs:
           git config user.email "forge@anthemsmith.com"
           git add songs/
           git rm --cached --ignore-unmatch \
-            "songs/${{ github.event.client_payload.order_id }}.claim.json" \
-            "songs/${{ github.event.client_payload.order_id }}.failed.json" \
-            "songs/${{ github.event.client_payload.order_id }}.blocked.json" 2>/dev/null || true
-          rm -f "songs/${{ github.event.client_payload.order_id }}.claim.json" \
-                "songs/${{ github.event.client_payload.order_id }}.failed.json" \
-                "songs/${{ github.event.client_payload.order_id }}.blocked.json"
+            "songs/${{ github.event.client_payload.order.order_id }}.claim.json" \
+            "songs/${{ github.event.client_payload.order.order_id }}.failed.json" \
+            "songs/${{ github.event.client_payload.order.order_id }}.blocked.json" 2>/dev/null || true
+          rm -f "songs/${{ github.event.client_payload.order.order_id }}.claim.json" \
+                "songs/${{ github.event.client_payload.order.order_id }}.failed.json" \
+                "songs/${{ github.event.client_payload.order.order_id }}.blocked.json"
           git add songs/
-          git commit -m "song ${{ github.event.client_payload.order_id }}" || echo "nothing to commit"
+          git commit -m "song ${{ github.event.client_payload.order.order_id }}" || echo "nothing to commit"
           git push
 
       - name: Deliver the song link (SMS / Email)
@@ -198,10 +199,10 @@ jobs:
           TWILIO_FROM: ${{ secrets.TWILIO_FROM }}
           GABE_CC: ${{ secrets.GABE_CC }}
           RESEND_KEY: ${{ secrets.RESEND_KEY }}
-          ORDER_ID: ${{ github.event.client_payload.order_id }}
-          DELIVERY: ${{ github.event.client_payload.delivery }}
-          SMS_TO: ${{ github.event.client_payload.sms_to }}
-          EMAIL: ${{ github.event.client_payload.email }}
+          ORDER_ID: ${{ github.event.client_payload.order.order_id }}
+          DELIVERY: ${{ github.event.client_payload.order.delivery }}
+          SMS_TO: ${{ github.event.client_payload.order.sms_to }}
+          EMAIL: ${{ github.event.client_payload.order.email }}
         run: python scripts/deliver_song.py
 
       - name: Commit delivery status
@@ -209,6 +210,6 @@ jobs:
         run: |
           git config user.name "anthemsmith-forge"
           git config user.email "forge@anthemsmith.com"
-          git add songs/${{ github.event.client_payload.order_id }}.delivery.json 2>/dev/null || true
-          git commit -m "delivery ${{ github.event.client_payload.order_id }}" || echo "nothing to commit"
+          git add songs/${{ github.event.client_payload.order.order_id }}.delivery.json 2>/dev/null || true
+          git commit -m "delivery ${{ github.event.client_payload.order.order_id }}" || echo "nothing to commit"
           git push || echo "push skipped"
