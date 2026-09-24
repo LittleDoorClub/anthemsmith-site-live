@@ -5,6 +5,7 @@ const rawStories=[
 {title:'Spin cycle soulmates.',tag:'COUPLES / LOVE, WITH EXTRA NOODLES',desc:'No grand gestures. Just you, me, and dryer number three.',caption:'Fictional caption: “Date night. Two washes and extra noodles.”',comment:'Fictional comment: “You still owe me the last dumpling.”',lyric:'Two washes, extra noodles, one sock gone astray, / I’d choose you in this laundromat on any given day.'},
 {title:'He knows the regulars.',tag:'FRIENDSHIP / EVERYONE’S FAVORITE',desc:'We came to see our friends. They came to see the dog.',caption:'Fictional caption: “Pretty sure we’re just his ride home.”',comment:'Fictional comment: “He gets greeted before we do.”',lyric:'They shout your name before they ask for mine, / Green bandana, pink tongue, stealing all the limelight.'}
 ];
+const AS_EMAIL='gabrieljtao@gmail.com';
 
 stories.forEach((s,i)=>Object.assign(s,rawStories[i]));
 // Published demo selections. Keep reference masters unchanged.
@@ -137,7 +138,7 @@ function watchOrder(id,box,tries){
  let n=0;const timer=setInterval(async()=>{
   n++;const pct=Math.min(92,5+n*3);const bar=box.querySelector('.progress-bar');if(bar)bar.style.width=pct+'%';
   try{const r=await fetch(orderStatusURL(id)+'?t='+Date.now());let delivered=false;if(r.ok){const d=await r.json().catch(()=>null);const pd=d;if(!pd){delivered=false}else{delivered=!pd.status||pd.status==='delivered'};}if(delivered){clearInterval(timer);box.innerHTML='<h3>Your song is ready. 🎉</h3><audio controls autoplay src="'+songURL(id)+'"></audio><p class="small">Love it? Add another song for <b>$3</b> — <a href="https://buy.stripe.com/00w9AUbah8I9cP38ni14403" target="_blank" rel="noopener">grab the $3 follow-up</a>, come back, and hit the button again with new photos.</p><p class="small"><a class="instagram-button" download href="'+songURL(id)+'">Download your song</a> &nbsp; <a class="text-button" href="https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'-full.mp3" download>Full version</a></p>';}
-   else if(n>(tries||90)){clearInterval(timer);box.innerHTML='<p class="small">Still forging — check back in a few minutes at this page, or contact us with your order ID.</p>';}
+   else if(n>(tries||90)){clearInterval(timer);box.innerHTML='<p class="small">Still forging — check back in a few minutes at this page, or email gabrieljtao@gmail.com with your order ID.</p>';}
   }catch(e){}
  },4000);
 }
@@ -175,7 +176,7 @@ function payChoicePanel(values){
   const b=document.getElementById('paidDone');
   if(b)b.onclick=()=>{values.pay_method=document.querySelector('input[name="pay_method"]:checked')?.value||'card';
    try{sessionStorage.setItem('anthemsmith_order',JSON.stringify(values))}catch(e){}
-   values.paid_status='paid_claimed';fireOrder(values).then(()=>watchOrder(values.request_id,box)).catch(e=>{box.innerHTML='<p class="small">Order failed to start: '+e.message+' — your payment is safe, contact us with ID '+values.request_id+'.</p>'})};
+   values.paid_status='paid_claimed';fireOrder(values).then(()=>watchOrder(values.request_id,box)).catch(e=>{box.innerHTML='<p class="small">Order failed to start: '+e.message+' — your payment is safe, email gabrieljtao@gmail.com with your order ID '+values.request_id+'.</p>'})};
  };
 };
 async function submitInstant(){
@@ -218,12 +219,12 @@ function resumeAfterPayment(){
    data.delivery=m; if(m==='sms'){data.sms_to=c.value;data.email='';} else {data.email=c.value;data.sms_to='';}
    try{sessionStorage.setItem('anthemsmith_order',JSON.stringify(data))}catch(e){}
    const box2=$('#brief');box2.innerHTML='<p class="small">Firing the forge...</p>';
-   fireOrder(data).then(()=>watchOrder(data.request_id,box2)).catch(e=>{box2.innerHTML='<p class="small">Order failed to start: '+e.message+' — contact us with ID '+data.request_id+'.</p>'});
+   fireOrder(data).then(()=>watchOrder(data.request_id,box2)).catch(e=>{box2.innerHTML='<p class="small">Order failed to start: '+e.message+' — email gabrieljtao@gmail.com with your order ID '+data.request_id+'.</p>'});
   };
   return true;
  }
  data.paid_status='paid_stripe_return'; const box=$('#brief');box.hidden=false;box.innerHTML='<p class="small">Payment received. Firing the forge...</p>';
- fireOrder(data).then(()=>watchOrder(data.request_id,box)).catch(e=>{box.innerHTML='<p class="small">Order failed to start: '+e.message+' — your payment is safe, contact us with ID '+data.request_id+'.</p>'});
+ fireOrder(data).then(()=>watchOrder(data.request_id,box)).catch(e=>{box.innerHTML='<p class="small">Order failed to start: '+e.message+' — your payment is safe, email gabrieljtao@gmail.com with your order ID '+data.request_id+'.</p>'});
  return true;
 }
 window.addEventListener('load',()=>{
