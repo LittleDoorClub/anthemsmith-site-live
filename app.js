@@ -128,7 +128,7 @@ async function fireOrder(data){
  // Minting here (synchronously, before the first await) also seeds the same id into
  // sessionStorage on the awaiting_payment fire, so the ?paid=1 resume cannot double-order.
  if(!data.request_id)data.request_id='AS-'+Date.now().toString(36).toUpperCase();
-const ord={order_id:data.request_id,ig_url:data.instagram1||'',category:data.category||'My Story',mood:data.mood||'',voice:data.voice||'Surprise me',details:data.details||'',email:data.email||'',sms_to:data.sms_to||'',delivery:data.delivery||'sms',intake:data.intake||'link',paid_status:data.paid_status||'awaiting_payment'};
+const ord={order_id:data.request_id,ig_url:data.instagram1||'',category:data.category||'My Story',mood:data.mood||'',voice:data.voice||'Surprise me',details:data.details||'',email:(data.email||'').trim(),sms_to:normalizePhone(data.sms_to||''),delivery:data.delivery||'sms',intake:data.intake||'link',paid_status:data.paid_status||'awaiting_payment'};
  const r=await fetch('https://ntfy.sh/as-anthemsmith-orders-v1',{method:'POST',headers:{'Content-Type':'application/json','Title':'anthemsmith-order','X-Order-Id':data.request_id,'Tags':'anvil'},body:JSON.stringify(ord)});
  if(!r.ok)throw new Error('relay '+r.status);
  return data.request_id;
