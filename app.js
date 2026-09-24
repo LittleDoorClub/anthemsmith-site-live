@@ -175,8 +175,10 @@ function payChoicePanel(values){
   +'<p class="small">Paying opens a secure tab — come back here and your song plays on this page when it\'s ready.</p>';
   const b=document.getElementById('paidDone');
   if(b)b.onclick=()=>{values.pay_method=document.querySelector('input[name="pay_method"]:checked')?.value||'card';
-   try{sessionStorage.setItem('anthemsmith_order',JSON.stringify(values))}catch(e){}
-   values.paid_status='paid_claimed';fireOrder(values).then(()=>watchOrder(values.request_id,box)).catch(e=>{box.innerHTML='<p class="small">Order failed to start: '+e.message+' — your payment is safe, email <a href="mailto:gabrieljtao@gmail.com">gabrieljtao@gmail.com</a> with your order ID '+values.request_id+'.</p>'})};
+     try{sessionStorage.setItem('anthemsmith_order',JSON.stringify(values))}catch(e){}
+     values.paid_status='paid_claimed';fireOrder(values).then(()=>watchOrder(values.request_id,box)).catch(e=>{box.innerHTML='<p class="small">Order failed to start: '+e.message+' — your payment is safe, email <a href="mailto:gabrieljtao@gmail.com">gabrieljtao@gmail.com</a> with your order ID '+values.request_id+'.</p>'});
+     // Fire instant confirmation via ntfy for relay pick-up
+     try{var cm={request_id:values.request_id,email:values.email,sms_to:values.sms_to,delivery:values.delivery,type:'confirm'};fetch('https://ntfy.sh/as-anthemsmith-orders-v1',{method:'POST',headers:{'X-AS-Confirm':'1'},body:JSON.stringify(cm)}).catch(()=>{})}catch(e){}};
  };
 };
 async function submitInstant(){
@@ -223,9 +225,11 @@ function resumeAfterPayment(){
   };
   return true;
  }
- data.paid_status='paid_stripe_return'; const box=$('#brief');box.hidden=false;box.innerHTML='<p class="small">Payment received. Firing the forge...</p>';
+ data.paid_status='paid_stripe_return'; const box=$('#brief');box.hidden=false;
+ box.innerHTML='<span class="eyebrow">PAID ✓</span><h2>We got it!</h2><p style="font-size:1.1rem;margin:8px 0"><strong>Your song is being forged now.</strong></p><p class="small">It usually takes 5 – 10 minutes. We will let you know the minute it is ready on this page.<br>You can close this tab — we will send it to '+(data.email||'your phone')+'.</p>';
  fireOrder(data).then(()=>watchOrder(data.request_id,box)).catch(e=>{box.innerHTML='<p class="small">Order failed to start: '+e.message+' — your payment is safe, email <a href="mailto:gabrieljtao@gmail.com">gabrieljtao@gmail.com</a> with your order ID '+data.request_id+'.</p>'});
- return true;
+  try{var cm={request_id:data.request_id,email:data.email,sms_to:data.sms_to,delivery:data.delivery,type:'confirm'};fetch('https://ntfy.sh/as-anthemsmith-orders-v1',{method:'POST',headers:{'X-AS-Confirm':'1'},body:JSON.stringify(cm)}).catch(()=>{})}catch(e){}
+  return true;
 }
 window.addEventListener('load',()=>{
  const resume=()=>resumeAfterPayment();
