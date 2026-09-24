@@ -322,7 +322,7 @@ subprocess.run(["ffmpeg", "-y", "-ss", str(start), "-t", "30", "-i", f"{OUT}/{OI
 os.replace(f"{OUT}/{OID}-t1.mp3", f"{OUT}/{OID}-full.mp3")
 os.remove(f"{OUT}/{OID}-t1v.mp3")
 
-meta = {"order_id": OID, "status": "delivered", "handle": handle, "category": CATEGORY,
+meta = {"order_id": OID, "status": "audio_ready", "handle": handle, "category": CATEGORY,
         "display_name": display_name or None,
         "duration_full": dur, "model": model_used,
         "heart_anchor": anchor, "heart_anchor_source": anchor_src,
