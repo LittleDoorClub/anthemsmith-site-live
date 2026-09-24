@@ -160,8 +160,13 @@ jobs:
           git config user.name "anthemsmith-forge"
           git config user.email "forge@anthemsmith.com"
           git add songs/
-          git rm --cached --ignore-unmatch "songs/${{ github.event.client_payload.order_id }}.claim.json" || true
-          rm -f "songs/${{ github.event.client_payload.order_id }}.claim.json"
+          git rm --cached --ignore-unmatch \
+            "songs/${{ github.event.client_payload.order_id }}.claim.json" \
+            "songs/${{ github.event.client_payload.order_id }}.failed.json" \
+            "songs/${{ github.event.client_payload.order_id }}.blocked.json" 2>/dev/null || true
+          rm -f "songs/${{ github.event.client_payload.order_id }}.claim.json" \
+                "songs/${{ github.event.client_payload.order_id }}.failed.json" \
+                "songs/${{ github.event.client_payload.order_id }}.blocked.json"
           git add songs/
           git commit -m "song ${{ github.event.client_payload.order_id }}" || echo "nothing to commit"
           git push
