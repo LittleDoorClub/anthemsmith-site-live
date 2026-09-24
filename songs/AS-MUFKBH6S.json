@@ -1,0 +1,23 @@
+{
+ "order_id": "AS-MUFKBH6S",
+ "status": "audio_ready",
+ "handle": null,
+ "category": "My Story",
+ "display_name": null,
+ "duration_full": 204.36,
+ "model": "V6",
+ "heart_anchor": "Slayer, I slave the day. Make a good chorus out of this",
+ "heart_anchor_source": "brief",
+ "reference": null,
+ "sources": {
+  "bio": false,
+  "captions_used": 0,
+  "alts_seen": 0,
+  "alt_lines_used": 0,
+  "details": true,
+  "anchor_source": "brief",
+  "render_status": null,
+  "render_chrome": null
+ },
+ "ingest_note": ""
+}
