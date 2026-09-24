@@ -93,25 +93,38 @@ if IG_URL:
     render_status = None
     render_chrome = None
     if ig_ingest is not None:
-        # STAGE 1.5.a ANCHOR -- logged-out, no account, no vendor. A plain
-        # urllib GET of this URL returns a JS shell with 0 captions and a
-        # Follower/Following/Posts count line (measured 2026-09-16), which is
-        # why the old path invented an anchor. The rendered DOM carries the
-        # real captions (grid img alt) and the profile payload.
-        # render_handle_detail ALSO reports WHY a render produced nothing
-        # (no_renderer / login_wall / empty / bad_handle): those causes are not
-        # interchangeable, and folding them into one string is what made an
-        # empty live order read as "the customer's profile is private".
-        if hasattr(ig_ingest, "render_handle_detail"):
-            rd = ig_ingest.render_handle_detail(handle)
-            html = rd.get("html") or ""
-            render_status = rd.get("status")
-            render_chrome = rd.get("chrome")
-            print("RENDER handle=%s status=%s bytes=%s chrome=%s head=%r"
-                  % (handle, render_status, rd.get("bytes"), render_chrome,
-                     (rd.get("head") or "").replace("\n", " ")[:160]), flush=True)
+        # STAGE 1.5.a ANCHOR — try instaloader (mobile API) first.
+        # The mobile API doesn't login-wall; headless Chrome does on cloud IPs.
+        info_il = None
+        if hasattr(ig_ingest, "scrape_instaloader"):
+            info_il = ig_ingest.scrape_instaloader(handle)
+        if info_il:
+            info = info_il
+            render_status = info_il.get("render_status") or "posts"
+            html = "<instaloader>"  # marker: no DOM needed downstream
+            # extract fields directly (mobile API returns structured data, no ingest needed)
+            bio = info_il.get("bio") or ""
+            captions = info_il.get("captions") or []
+            alt_texts = []   # mobile API returns no alt-text
+            alt_lines = info_il.get("alt_lines") or []
+            display_name = info_il.get("display_name") or ""
+            print("RENDER handle=%s method=instaloader status=%s captions=%d" % (handle, render_status, len(captions)), flush=True)
         else:
-            html = ig_ingest.render_handle(handle) or ""
+            # Fall back to headless Chrome — the original path.
+            # render_handle_detail ALSO reports WHY a render produced nothing
+            # (no_renderer / login_wall / empty / bad_handle): those causes are not
+            # interchangeable, and folding them into one string is what made an
+            # empty live order read as "the customer's profile is private".
+            if hasattr(ig_ingest, "render_handle_detail"):
+                rd = ig_ingest.render_handle_detail(handle)
+                html = rd.get("html") or ""
+                render_status = rd.get("status")
+                render_chrome = rd.get("chrome")
+                print("RENDER handle=%s status=%s bytes=%s chrome=%s head=%r"
+                      % (handle, render_status, rd.get("bytes"), render_chrome,
+                         (rd.get("head") or "").replace("\n", " ")[:160]), flush=True)
+            else:
+                html = ig_ingest.render_handle(handle) or ""
     if not html:
         try:
             html = fetch(f"https://www.instagram.com/{handle}/").decode("utf-8", "ignore")
@@ -121,7 +134,7 @@ if IG_URL:
             ingest_note = "profile unreachable (private/deleted/blocked)"
     if not html and not render_status:
         render_status = "unavailable"
-    if ig_ingest is not None and html:
+    if ig_ingest is not None and html and not html.startswith("<instaloader"):
         try:
             info = ig_ingest.ingest(html, handle, render_status=render_status)
         except TypeError:  # an older ig_ingest revision: never crash the lane

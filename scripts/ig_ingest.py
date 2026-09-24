@@ -584,6 +584,38 @@ def _selftest():
     return 0 if not bad else 1
 
 
+# ------------------------------------------------------------------ instaloader lane
+def scrape_instaloader(handle):
+    """Try Instagram's mobile API via instaloader (no login wall).
+
+    Returns the same shape as ingest() — bio, captions, alt_lines, display_name,
+    render_status — or None on any failure (caller falls back to headless Chrome).
+    """
+    try:
+        import instaloader
+    except ImportError:
+        return None
+    try:
+        L = instaloader.Instaloader()
+        profile = instaloader.Profile.from_username(L.context, handle)
+        captions = []
+        for post in profile.get_posts():
+            if post.caption:
+                captions.append(post.caption)
+            if len(captions) >= 3:
+                break
+        return {
+            "display_name": profile.full_name or None,
+            "bio": profile.biography or None,
+            "captions": captions,
+            "alt_lines": [],  # mobile API returns no alt-text
+            "render_status": "posts",
+            "_source": "instaloader",
+        }
+    except Exception:
+        return None
+
+
 if __name__ == "__main__":
     if "--selftest" in sys.argv:
         sys.exit(_selftest())

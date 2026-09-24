@@ -127,6 +127,7 @@ jobs:
       - name: Install audio tools
         run: |
           pip install librosa numpy --quiet
+          pip install instaloader --quiet
           sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
 
       - name: "Forge song: scrape, measure, lyrics, Suno, QC"
