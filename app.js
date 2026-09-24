@@ -117,6 +117,8 @@ function requestText(data){return JSON.stringify(data,null,1)}
 // ===== INSTANT FLOW: IG link -> Stripe $5 -> repo_dispatch -> forge -> play =====
 const GH_OWNER='LittleDoorClub',GH_REPO='anthemsmith-site-live';
 function orderStatusURL(id){return 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'.json'}
+function blockedStatusURL(id){return 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'.blocked.json'}
+function failedStatusURL(id){return 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'.failed.json'}
 function songURL(id){return 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'.mp3'}
 async function fireOrder(data){
  // Relay via ntfy (public topic, JSON body). The forge poller picks it up and
@@ -137,8 +139,22 @@ function watchOrder(id,box,tries){
  box.innerHTML='<p class="small">Forging your song... this takes 3-5 minutes. Keep this tab open.</p><div class="progress"><div class="progress-bar" style="width:5%"></div></div>';
  let n=0;const timer=setInterval(async()=>{
   n++;const pct=Math.min(92,5+n*3);const bar=box.querySelector('.progress-bar');if(bar)bar.style.width=pct+'%';
-  try{const r=await fetch(orderStatusURL(id)+'?t='+Date.now());let delivered=false;if(r.ok){const d=await r.json().catch(()=>null);const pd=d;if(!pd){delivered=false}else{delivered=pd.status==='audio_ready'||pd.status==='delivered'};}if(delivered){clearInterval(timer);box.innerHTML='<h3>Your song is ready. 🎉</h3><audio controls autoplay src="'+songURL(id)+'"></audio><p class="small">Love it? Add another song for <b>$3</b> — <a href="https://buy.stripe.com/00w9AUbah8I9cP38ni14403" target="_blank" rel="noopener">grab the $3 follow-up</a>, come back, and hit the button again with new photos.</p><p class="small"><a class="instagram-button" download href="'+songURL(id)+'">Download your song</a> &nbsp; <a class="text-button" href="https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'-full.mp3" download>Full version</a></p>';}
-   else if(n>(tries||90)){clearInterval(timer);box.innerHTML='<p class="small">Still forging — check back in a few minutes at this page, or email <a href="mailto:gabrieljtao@gmail.com">gabrieljtao@gmail.com</a> with your order ID.</p>';}
+  try{
+   // Poll all three status files in parallel — blocked/failed catch stranded orders early
+   const [r,rb,rf]=await Promise.all([
+     fetch(orderStatusURL(id)+'?t='+Date.now()).catch(()=>null),
+     fetch(blockedStatusURL(id)+'?t='+Date.now()).catch(()=>null),
+     fetch(failedStatusURL(id)+'?t='+Date.now()).catch(()=>null)
+   ]);
+   // BUG 6: blocked = private IG / no anchor — tell customer before they give up
+   if(rb&&rb.ok){const bd=await rb.json().catch(()=>null);clearInterval(timer);
+    box.innerHTML='<h3>Can\'t read your Instagram</h3><p>Your profile appears to be private or unreachable from the web.</p><p class="small">We can still make your song! <strong>Switch to the Photos or Screenshot lane</strong> — upload your grid, add captions, and we\'ll retry your order. Your payment carries over.</p>';return;}
+   // BUG 6: failed = payment gate or generation failure — actionable message
+   if(rf&&rf.ok){const fd=await rf.json().catch(()=>null);clearInterval(timer);
+    box.innerHTML='<h3>Order couldn\'t process</h3><p class="small">'+((fd&&fd.reason)||'Something went wrong during forging.')+'</p><p class="small">Your payment is safe — email <a href="mailto:'+AS_EMAIL+'">'+AS_EMAIL+'</a> with your order ID '+id+'.</p>';return;}
+   let delivered=false;if(r&&r.ok){const d=await r.json().catch(()=>null);if(d){delivered=d.status==='audio_ready'||d.status==='delivered';}}
+   if(delivered){clearInterval(timer);box.innerHTML='<h3>Your song is ready. 🎉</h3><audio controls autoplay src="'+songURL(id)+'"></audio><p class="small">Love it? Add another song for <b>$3</b> — <a href="https://buy.stripe.com/00w9AUbah8I9cP38ni14403" target="_blank" rel="noopener">grab the $3 follow-up</a>, come back, and hit the button again with new photos.</p><p class="small"><a class="instagram-button" download href="'+songURL(id)+'">Download your song</a> &nbsp; <a class="text-button" href="https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'-full.mp3" download>Full version</a></p>';}
+   else if(n>(tries||90)){clearInterval(timer);box.innerHTML='<p class="small">Still forging — check back in a few minutes at this page, or email <a href="mailto:'+AS_EMAIL+'">'+AS_EMAIL+'</a> with your order ID.</p>';}
   }catch(e){}
  },4000);
 }
@@ -221,13 +237,13 @@ function resumeAfterPayment(){
    data.delivery=m; if(m==='sms'){data.sms_to=c.value;data.email='';} else {data.email=c.value;data.sms_to='';}
    try{sessionStorage.setItem('anthemsmith_order',JSON.stringify(data))}catch(e){}
    const box2=$('#brief');box2.innerHTML='<p class="small">Firing the forge...</p>';
-   fireOrder(data).then(()=>watchOrder(data.request_id,box2)).catch(e=>{box2.innerHTML='<p class="small">Order failed to start: '+e.message+' — email <a href="mailto:gabrieljtao@gmail.com">gabrieljtao@gmail.com</a> with your order ID '+data.request_id+'.</p>'});
+   fireOrder(data).then(()=>watchOrder(data.request_id,box2)).catch(e=>{box2.innerHTML='<p class="small">Order failed to start: '+e.message+' — email <a href="mailto:'+AS_EMAIL+'">'+AS_EMAIL+'</a> with your order ID '+data.request_id+'.</p>'});
   };
   return true;
  }
  data.paid_status='paid_stripe_return'; const box=$('#brief');box.hidden=false;
  box.innerHTML='<span class="eyebrow">PAID ✓</span><h2>We got it!</h2><p style="font-size:1.1rem;margin:8px 0"><strong>Your song is being forged now.</strong></p><p class="small">It usually takes 5 – 10 minutes. We will let you know the minute it is ready on this page.<br>You can close this tab — we will send it to '+(data.email||'your phone')+'.</p>';
- fireOrder(data).then(()=>watchOrder(data.request_id,box)).catch(e=>{box.innerHTML='<p class="small">Order failed to start: '+e.message+' — your payment is safe, email <a href="mailto:gabrieljtao@gmail.com">gabrieljtao@gmail.com</a> with your order ID '+data.request_id+'.</p>'});
+ fireOrder(data).then(()=>watchOrder(data.request_id,box)).catch(e=>{box.innerHTML='<p class="small">Order failed to start: '+e.message+' — your payment is safe, email <a href="mailto:'+AS_EMAIL+'">'+AS_EMAIL+'</a> with your order ID '+data.request_id+'.</p>'});
   try{var cm={request_id:data.request_id,email:data.email,sms_to:data.sms_to,delivery:data.delivery,type:'confirm'};fetch('https://ntfy.sh/as-anthemsmith-orders-v1',{method:'POST',headers:{'X-AS-Confirm':'1'},body:JSON.stringify(cm)}).catch(()=>{})}catch(e){}
   return true;
 }
