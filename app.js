@@ -142,32 +142,41 @@ function watchOrder(id,box,tries){
  },4000);
 }
 function payChoicePanel(values){
- // FIX 09-17: fire the order relay THE MOMENT the pay panel opens, tagged awaiting_payment.
- // If the customer never comes back (close tab, stuck on Stripe), the order+contact still reaches the forge.
+ // FIX 09-23: capture delivery FIRST, then fire awaiting_payment WITH contact.
+ // Old behaviour fired without a destination, so bail-outs stranded paid orders with no contact.
  values.paid_status='awaiting_payment';sessionStorage.setItem('anthemsmith_order',JSON.stringify(values));
- fireOrder(values).catch(()=>{ /* relay retry happens on paidDone or resume */ });
  const box=$('#brief');box.hidden=false;
- box.innerHTML='<span class="eyebrow">LAST STEP</span><h2>Lock in your song — $5</h2>'
- +'<div class="pay-grid">'
- +'<div class="pay-card"><b>Pay with Card</b><p class="small">Apple Pay · Link · instant</p><a class="pay-link" href="https://buy.stripe.com/6oU5kE4LT9Md16lbzu14402?success_url=http%3A%2F%2Fanthemsmith.com%2F%3Fpaid%3D1" target="_blank" rel="noopener">Pay with Card</a></div>'
- +'<div class="pay-card"><b>Pay with Cash App</b><img class="pay-qr" src="assets/cashapp_qr_clean.jpg" alt="Cash App QR" width="220" height="220"><a class="pay-link" href="https://cash.app/$Gabrielmoneys/5" target="_blank" rel="noopener">Pay with Cash App</a></div>'
- +'<div class="pay-card"><b>Pay with Venmo</b><img class="pay-qr" src="assets/venmo_qr_clean.jpg" alt="Venmo QR" width="220" height="220"><a class="pay-link" href="https://venmo.com/?txn=pay&recipients=Gabriel-Tao&amount=5.00&note=AnthemSmith%20song" target="_blank" rel="noopener">Pay with Venmo</a></div>'
- +'</div>'
+ // --- Step A: delivery picker (before checkout) ---
+ box.innerHTML='<span class="eyebrow">ONE MORE THING</span><h2>How should we send your song?</h2>'
  +'<div class="delivery-block" style="margin:14px 0;padding:12px;border:1px solid #ddd;border-radius:10px">'
- +'<b>Get your song:</b> <label style="margin-right:10px"><input type="radio" name="delivery" value="sms" checked onchange="window.__renderDelivery()"> Text me the link</label>'
+ +'<label style="margin-right:12px"><input type="radio" name="delivery" value="sms" checked onchange="window.__renderDelivery()"> Text me the link</label>'
  +'<label><input type="radio" name="delivery" value="email" onchange="window.__renderDelivery()"> Email me the link</label>'
  +'<div id="deliveryFields" style="margin-top:8px"><input type="tel" id="deliveryPhone" name="sms_to" autocomplete="tel" placeholder="Your cell number — song lands by SMS" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px"></div>'
  +'</div>'
- +'<button class="primary" id="paidDone">I\'ve paid — forge my song</button>'
- +'<p class="small">Paying opens a secure tab — come back here and your song plays on this page when it\'s ready.</p>';
- const b=document.getElementById('paidDone');
- if(b)b.onclick=()=>{values.pay_method=document.querySelector('input[name="pay_method"]:checked')?.value||'card';
- const dMode=(document.querySelector('input[name="delivery"]:checked')||{}).value||'sms';
- if(dMode==='sms'){const c=validateContact('sms',(document.getElementById('deliveryPhone')||{}).value||'');if(!c.ok){box.innerHTML='<p class="small">Add a valid cell number with country code (e.g. +1 212 555 1234) so we can text the song — or switch to email above.</p>';return}values.sms_to=c.value;values.email='';}
- else{const c=validateContact('email',(document.getElementById('deliveryEmail')||{}).value||'');if(!c.ok){box.innerHTML='<p class="small">Add a valid email (name@example.com) so we can send the song — or switch to text above.</p>';return}values.email=c.value;values.sms_to='';}
- values.delivery=dMode;
- try{sessionStorage.setItem('anthemsmith_order',JSON.stringify(values))}catch(e){}
- values.paid_status='paid_claimed';fireOrder(values).then(()=>watchOrder(values.request_id,box)).catch(e=>{box.innerHTML='<p class="small">Order failed to start: '+e.message+' — your payment is safe, contact us with ID '+values.request_id+'.</p>'})};
+ +'<button class="primary" id="deliveryNext">Next — choose payment</button>'
+ +'<p class="small">We need to know where to send your song.</p>';
+ document.getElementById('deliveryNext').onclick=()=>{
+  const dMode=(document.querySelector('input[name="delivery"]:checked')||{}).value||'sms';
+  if(dMode==='sms'){const c=validateContact('sms',(document.getElementById('deliveryPhone')||{}).value||'');if(!c.ok){box.innerHTML='<p class="small">Add a valid cell number with country code (e.g. +1 212 555 1234) so we can text the song — or switch to email above.</p>';return}values.sms_to=c.value;values.email='';}
+  else{const c=validateContact('email',(document.getElementById('deliveryEmail')||{}).value||'');if(!c.ok){box.innerHTML='<p class="small">Add a valid email (name@example.com) so we can send the song — or switch to text above.</p>';return}values.email=c.value;values.sms_to='';}
+  values.delivery=dMode;
+  try{sessionStorage.setItem('anthemsmith_order',JSON.stringify(values))}catch(e){}
+  // delivery captured — fire the order WITH contact, tagged awaiting_payment
+  fireOrder(values).catch(()=>{ /* retry on paidDone */ });
+  // --- Step B: payment panel ---
+  box.innerHTML='<span class="eyebrow">LAST STEP</span><h2>Lock in your song — $5</h2>'
+  +'<div class="pay-grid">'
+  +'<div class="pay-card"><b>Pay with Card</b><p class="small">Apple Pay · Link · instant</p><a class="pay-link" href="https://buy.stripe.com/6oU5kE4LT9Md16lbzu14402?success_url=http%3A%2F%2Fanthemsmith.com%2F%3Fpaid%3D1" target="_blank" rel="noopener">Pay with Card</a></div>'
+  +'<div class="pay-card"><b>Pay with Cash App</b><img class="pay-qr" src="assets/cashapp_qr_clean.jpg" alt="Cash App QR" width="220" height="220"><a class="pay-link" href="https://cash.app/$Gabrielmoneys/5" target="_blank" rel="noopener">Pay with Cash App</a></div>'
+  +'<div class="pay-card"><b>Pay with Venmo</b><img class="pay-qr" src="assets/venmo_qr_clean.jpg" alt="Venmo QR" width="220" height="220"><a class="pay-link" href="https://venmo.com/?txn=pay&recipients=Gabriel-Tao&amount=5.00&note=AnthemSmith%20song" target="_blank" rel="noopener">Pay with Venmo</a></div>'
+  +'</div>'
+  +'<button class="primary" id="paidDone">I\'ve paid — forge my song</button>'
+  +'<p class="small">Paying opens a secure tab — come back here and your song plays on this page when it\'s ready.</p>';
+  const b=document.getElementById('paidDone');
+  if(b)b.onclick=()=>{values.pay_method=document.querySelector('input[name="pay_method"]:checked')?.value||'card';
+   try{sessionStorage.setItem('anthemsmith_order',JSON.stringify(values))}catch(e){}
+   values.paid_status='paid_claimed';fireOrder(values).then(()=>watchOrder(values.request_id,box)).catch(e=>{box.innerHTML='<p class="small">Order failed to start: '+e.message+' — your payment is safe, contact us with ID '+values.request_id+'.</p>'})};
+ };
 };
 async function submitInstant(){
  const values=Object.fromEntries(Array.from(new FormData($('#songForm'))).filter(([,v])=>typeof v==='string'));
