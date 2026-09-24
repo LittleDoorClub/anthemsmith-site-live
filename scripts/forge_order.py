@@ -176,8 +176,83 @@ band = {"My Story": "boom-bap hip-hop, 92 BPM, dusty drums, warm bass, confident
         "Couples": "warm retro soul, 90 BPM, electric piano, buttery bass, intimate duet feel",
         "Friendship": "bouncy indie groove, 100 BPM, plucked riff, gang vocals, joyful male vocal"}
 style = band.get(CATEGORY, band["My Story"])
+
+# Reference resolution: the old path appended a raw URL to the style prompt as if
+# the model could listen to it. MuAPI custom_mode=true does NOT support audio_urls,
+# so the URL string was meaningless noise. This replacement resolves YouTube/Spotify
+# links via their free oEmbed/OG endpoints and extracts measurable metadata (title,
+# artist) for use as musical guidance. If resolution fails, the reference is recorded
+# unresolved in metadata — the model is never told it heard a URL it didn't hear.
+reference_title = None
+reference_artist = None
+reference_resolved = False
 if REFERENCE_URL:
-    style += f", reference track: {REFERENCE_URL}"
+    ref_meta = {"url": REFERENCE_URL}
+    try:
+        ref_lower = REFERENCE_URL.lower()
+        # YouTube oEmbed — free, no API key, returns title in JSON
+        if "youtube.com/watch" in ref_lower or "youtu.be/" in ref_lower:
+            import re as _re
+            vid = None
+            for pat in (_re.compile(r'[?&]v=([^&]+)'), _re.compile(r'youtu\.be/([^?&]+)')):
+                m = pat.search(REFERENCE_URL)
+                if m:
+                    vid = m.group(1); break
+            if vid:
+                oembed_url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={vid}&format=json"
+                try:
+                    oembed = json.loads(fetch(oembed_url, timeout=10).decode())
+                    ref_meta["title"] = oembed.get("title")
+                    ref_meta["provider"] = "youtube"
+                    # YouTube titles are often "Artist — Song Title"; split if possible
+                    full_title = oembed.get("title", "")
+                    if " — " in full_title:
+                        parts = full_title.split(" — ", 1)
+                        ref_meta["artist"] = parts[0].strip()
+                        ref_meta["track"] = parts[1].strip()
+                    elif " - " in full_title:
+                        parts = full_title.split(" - ", 1)
+                        ref_meta["artist"] = parts[0].strip()
+                        ref_meta["track"] = parts[1].strip()
+                    else:
+                        ref_meta["artist"] = None
+                        ref_meta["track"] = full_title
+                except Exception:
+                    ref_meta["oembed_error"] = "unreachable"
+
+        # Spotify oEmbed — free, no API key
+        elif "open.spotify.com/track" in ref_lower or "spotify.link" in ref_lower:
+            try:
+                oembed_url = f"https://open.spotify.com/oembed?url={urllib.parse.quote(REFERENCE_URL, safe='')}"
+                oembed = json.loads(fetch(oembed_url, timeout=10).decode())
+                ref_meta["title"] = oembed.get("title")
+                ref_meta["provider"] = "spotify"
+                ref_meta["artist"] = None
+                ref_meta["track"] = oembed.get("title")
+            except Exception:
+                ref_meta["oembed_error"] = "unreachable"
+        else:
+            ref_meta["resolution"] = "domain not supported — no oEmbed endpoint known"
+
+        # Build style guidance from resolved metadata
+        if ref_meta.get("title"):
+            ref_desc = ref_meta.get("track") or ref_meta["title"]
+            if ref_meta.get("artist"):
+                ref_desc = f"{ref_meta['artist']} — {ref_desc}"
+            style += f", in the spirit of: {ref_desc}"
+            reference_title = ref_meta.get("title")
+            reference_artist = ref_meta.get("artist")
+            reference_resolved = True
+        else:
+            ref_meta["resolution"] = ref_meta.get("resolution") or "could not resolve metadata"
+            # Don't append garbage to style — just flag it
+    except Exception as ex:
+        ref_meta["resolution_error"] = str(ex)[:80]
+    ref_meta["resolved"] = reference_resolved
+    # Note: ref_meta is not used directly below but its values feed reference_title/artist/resolved
+else:
+    ref_meta = None
+
 if "hip" in corpus or "gym" in corpus: style = band["My Story"]
 
 # ---------- 4. LYRICS (heart anchor = most specific VISIBLE line; anti-cliche) ----------
@@ -326,7 +401,10 @@ meta = {"order_id": OID, "status": "audio_ready", "handle": handle, "category": 
         "display_name": display_name or None,
         "duration_full": dur, "model": model_used,
         "heart_anchor": anchor, "heart_anchor_source": anchor_src,
-        "reference_url": REFERENCE_URL or None,
+        "reference": {"url": REFERENCE_URL or None, 
+                      "resolved": reference_resolved,
+                      "title": reference_title, 
+                      "artist": reference_artist} if REFERENCE_URL else None,
         "sources": {"bio": bool(bio), "captions_used": len(captions),
                     "alts_seen": len(alt_texts), "alt_lines_used": len(alt_lines),
                     "details": bool(DETAILS), "anchor_source": anchor_src,
