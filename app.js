@@ -176,10 +176,10 @@ async function submitInstant(){
  const hasFiles=selectedIntakeFiles().length>0;
  if(!hasLink&&!hasFiles){$('#brief').hidden=false;$('#brief').innerHTML='<p class="small">Give us a way in — an Instagram link, a grid screenshot, or up to 10 photos. Any one works.</p>';return}
  // fold the active lane's story text into details so the forge gets the full brief
- const laneText=(values['laneDetails'+lane]||'').trim();
+ const laneText=(values['laneDetails'+({'link':0,screenshot:1,photos:2}[lane])]||'').trim();
  const parts=[(values.details||'').trim(),laneText].filter(Boolean);
  values.details=parts.join('\n\n');
- values.intake=lane===0?'link':(lane===1?'screenshot':'photos');
+ values.intake=lane;
  values.file_count=hasFiles?String(selectedIntakeFiles().length):'0';
  // email dropped (Gabe 09-16): delivery is on-page download, no inbox needed
  payChoicePanel(values);
