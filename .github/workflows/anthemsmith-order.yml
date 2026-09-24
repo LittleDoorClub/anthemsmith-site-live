@@ -101,9 +101,11 @@ jobs:
                               print("skip bad ig_url", oid); continue
                           # screenshot/photos intake: forge runs on captions/details, no profile scrape needed
                           if claim_order(oid):
-                              payload = {"event_type": "anthemsmith-order", "client_payload": o}
+                              # `intake` is consumed above; dropping it keeps client_payload ≤10 keys (GitHub cap)
+                              dispatch_o = {k: v for k, v in o.items() if k != "intake"}
+                              payload = {"event_type": "anthemsmith-order", "client_payload": dispatch_o}
                               st, d = gh_json("POST", f"{GH}/dispatches", payload)
-                              print("dispatched", oid, st)
+                              print("dispatched", oid, st, "keys=%d" % len(dispatch_o))
                           if len(seen) >= 5:
                               break
               except Exception as ex:
