@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """AnthemSmith delivery — SMS (Twilio) or Email (Resend) the finished song link.
 Runs on GitHub Actions after the song commit. Reads ORDER_ID/DELIVERY/SMS_TO/EMAIL from env.
-Never fails the forge: delivery errors are logged, not raised (song is already safe in the repo)."""
-import json, os, sys, urllib.parse, urllib.request
+Delivery outcome is written to songs/<OID>.delivery.json for status tracking.
+Never fails the forge; delivery errors are logged, not raised (song is already safe)."""
+import json, os, sys, time, urllib.parse, urllib.request
 
 OID = os.environ["ORDER_ID"]
-DELIVERY = (os.environ.get("DELIVERY") or "sms").strip().lower()
+DELIVERY = (os.environ.get("DELIVERY") or "").strip().lower()
 SMS_TO = (os.environ.get("SMS_TO") or "").strip()
 EMAIL = (os.environ.get("EMAIL") or "").strip()
 GABE_CC = (os.environ.get("GABE_CC") or "").strip()
@@ -18,6 +19,17 @@ SONG_URL = f"https://anthemsmith.com/songs/{OID}.mp3"
 FULL_URL = f"https://anthemsmith.com/songs/{OID}-full.mp3"
 LINK = FULL_URL  # full version is the deliverable
 
+# ---- delivery status tracking ----
+def write_delivery_status(status, detail=""):
+    """Write songs/<OID>.delivery.json so app.js can show notification outcome."""
+    d = {"order_id": OID, "delivery_status": status, "ts": time.time(),
+         "mode": DELIVERY, "detail": str(detail)[:120]}
+    try:
+        os.makedirs("songs", exist_ok=True)
+        json.dump(d, open(f"songs/{OID}.delivery.json", "w"), indent=1)
+    except Exception:
+        pass  # never crash the forge over delivery tracking
+
 def sms_send(to, body):
     data = urllib.parse.urlencode({"From": TW_FROM, "To": to, "Body": body}).encode()
     req = urllib.request.Request(
@@ -28,7 +40,7 @@ def sms_send(to, body):
     with urllib.request.urlopen(req, timeout=30) as r:
         d = json.load(r)
     print(f"SMS -> {to}: {d.get('status')} ({d.get('sid')})")
-    return d.get("status")
+    return {"status": d.get("status"), "sid": d.get("sid"), "provider": "twilio"}
 
 def email_send(to, subject, text):
     data = json.dumps({"from": "AnthemSmith <songs@anthemsmith.com>",
@@ -39,7 +51,7 @@ def email_send(to, subject, text):
     with urllib.request.urlopen(req, timeout=30) as r:
         d = json.load(r)
     print(f"EMAIL -> {to}: {d}")
-    return d
+    return {"status": "sent", "id": d.get("id"), "provider": "resend"}
 
 def notify_gabe(line):
     if GABE_CC:
@@ -48,27 +60,59 @@ def notify_gabe(line):
         except Exception as e:
             print("gabe cc failed:", e)
 
-msg = (f"🎵 Your AnthemSmith song is ready! Play/download: {LINK} "
-       f"(order {OID}) — love it? Add another song for $3 at anthemsmith.com")
+msg = (f"\U0001f3b5 Your AnthemSmith song is ready! Play/download: {LINK} "
+       f"(order {OID}) \u2014 love it? Add another song for $3 at anthemsmith.com")
 
-if DELIVERY == "sms" and SMS_TO:
-    try:
-        st = sms_send(SMS_TO, msg)
-        notify_gabe(f"🐂 AS order {OID} delivered by SMS to {SMS_TO[:6]}*** — status {st}")
-    except Exception as e:
-        print("delivery error:", e)
-        notify_gabe(f"⚠️ AS order {OID}: SMS to customer FAILED ({str(e)[:80]}) — song is at {LINK}")
-elif DELIVERY == "email" and EMAIL:
-    try:
-        email_send(EMAIL, "Your AnthemSmith song is ready 🎵",
-                   f"Your song is ready!\n\nPlay / download: {LINK}\n\n30-second hook: {SONG_URL}\n\nOrder ID: {OID}\nLove it? Add another song for $3 at https://anthemsmith.com\n\n— AnthemSmith")
-        notify_gabe(f"🐂 AS order {OID} delivered by EMAIL to {EMAIL}")
-    except Exception as e:
-        print("delivery error:", e)
-        notify_gabe(f"⚠️ AS order {OID}: EMAIL to customer FAILED ({str(e)[:80]}) — song is at {LINK}")
+# ---- DELIVERY CONTRACT: require exactly one valid destination ----
+# Do NOT default to SMS when the mode is missing or ambiguous —
+# a missing mode with a valid email is silently lost in the old code.
+if not DELIVERY:
+    # No delivery mode specified — try to infer from available contacts
+    if SMS_TO and not EMAIL:
+        DELIVERY = "sms"
+    elif EMAIL and not SMS_TO:
+        DELIVERY = "email"
+    else:
+        write_delivery_status("failed", "no delivery mode specified")
+        print("no delivery mode on order", OID)
+        notify_gabe(f"\u26a0\ufe0f AS order {OID}: NO delivery mode — song waiting at {LINK}")
+        sys.exit(0)
+
+if DELIVERY == "sms":
+    if not SMS_TO:
+        write_delivery_status("failed", "SMS mode selected but no phone number")
+        notify_gabe(f"\u26a0\ufe0f AS order {OID}: SMS mode but NO phone — song at {LINK}")
+        print("delivery skip: SMS mode, no phone number")
+    else:
+        try:
+            result = sms_send(SMS_TO, msg)
+            write_delivery_status("delivered", result.get("sid") or "sms sent")
+            notify_gabe(f"\U0001f402 AS order {OID} delivered by SMS to {SMS_TO[:6]}*** — status {result.get('status')}")
+        except Exception as e:
+            write_delivery_status("failed", str(e)[:120])
+            notify_gabe(f"\u26a0\ufe0f AS order {OID}: SMS FAILED ({str(e)[:80]}) — song at {LINK}")
+            print("delivery error:", e)
+
+elif DELIVERY == "email":
+    if not EMAIL:
+        write_delivery_status("failed", "Email mode selected but no email address")
+        notify_gabe(f"\u26a0\ufe0f AS order {OID}: Email mode but NO address — song at {LINK}")
+        print("delivery skip: email mode, no address")
+    else:
+        try:
+            result = email_send(EMAIL, "Your AnthemSmith song is ready \U0001f3b5",
+                       f"Your song is ready!\n\nPlay / download: {LINK}\n\n30-second hook: {SONG_URL}\n\n"
+                       f"Order ID: {OID}\nLove it? Add another song for $3 at https://anthemsmith.com\n\n\u2014 AnthemSmith")
+            write_delivery_status("delivered", result.get("id") or "email sent")
+            notify_gabe(f"\U0001f402 AS order {OID} delivered by EMAIL to {EMAIL}")
+        except Exception as e:
+            write_delivery_status("failed", str(e)[:120])
+            notify_gabe(f"\u26a0\ufe0f AS order {OID}: EMAIL FAILED ({str(e)[:80]}) — song at {LINK}")
+            print("delivery error:", e)
+
 else:
-    # no delivery target captured (legacy order) — tell Gabe so nothing strands silently
-    print("no delivery target on order", OID)
-    notify_gabe(f"⚠️ AS order {OID}: NO delivery target — song waiting at {LINK}")
+    write_delivery_status("failed", f"unknown delivery mode: {DELIVERY}")
+    notify_gabe(f"\u26a0\ufe0f AS order {OID}: unknown delivery mode '{DELIVERY}' — song at {LINK}")
+    print("unknown delivery mode", DELIVERY)
 
 print("delivery step complete")

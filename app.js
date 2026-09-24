@@ -119,6 +119,7 @@ const GH_OWNER='LittleDoorClub',GH_REPO='anthemsmith-site-live';
 function orderStatusURL(id){return 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'.json'}
 function blockedStatusURL(id){return 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'.blocked.json'}
 function failedStatusURL(id){return 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'.failed.json'}
+function deliveryStatusURL(id){return 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'.delivery.json'}
 function songURL(id){return 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'.mp3'}
 async function fireOrder(data){
  // Relay via ntfy (public topic, JSON body). The forge poller picks it up and
@@ -140,11 +141,12 @@ function watchOrder(id,box,tries){
  let n=0;const timer=setInterval(async()=>{
   n++;const pct=Math.min(92,5+n*3);const bar=box.querySelector('.progress-bar');if(bar)bar.style.width=pct+'%';
   try{
-   // Poll all three status files in parallel — blocked/failed catch stranded orders early
-   const [r,rb,rf]=await Promise.all([
+   // Poll all four status files in parallel — blocked/failed catch stranded orders early
+   const [r,rb,rf,rd]=await Promise.all([
      fetch(orderStatusURL(id)+'?t='+Date.now()).catch(()=>null),
      fetch(blockedStatusURL(id)+'?t='+Date.now()).catch(()=>null),
-     fetch(failedStatusURL(id)+'?t='+Date.now()).catch(()=>null)
+     fetch(failedStatusURL(id)+'?t='+Date.now()).catch(()=>null),
+     fetch(deliveryStatusURL(id)+'?t='+Date.now()).catch(()=>null)
    ]);
    // BUG 6: blocked = private IG / no anchor — tell customer before they give up
    if(rb&&rb.ok){const bd=await rb.json().catch(()=>null);clearInterval(timer);
@@ -152,8 +154,11 @@ function watchOrder(id,box,tries){
    // BUG 6: failed = payment gate or generation failure — actionable message
    if(rf&&rf.ok){const fd=await rf.json().catch(()=>null);clearInterval(timer);
     box.innerHTML='<h3>Order couldn\'t process</h3><p class="small">'+((fd&&fd.reason)||'Something went wrong during forging.')+'</p><p class="small">Your payment is safe — email <a href="mailto:'+AS_EMAIL+'">'+AS_EMAIL+'</a> with your order ID '+id+'.</p>';return;}
-   let delivered=false;if(r&&r.ok){const d=await r.json().catch(()=>null);if(d){delivered=d.status==='audio_ready'||d.status==='delivered';}}
-   if(delivered){clearInterval(timer);box.innerHTML='<h3>Your song is ready. 🎉</h3><audio controls autoplay src="'+songURL(id)+'"></audio><p class="small">Love it? Add another song for <b>$3</b> — <a href="https://buy.stripe.com/00w9AUbah8I9cP38ni14403" target="_blank" rel="noopener">grab the $3 follow-up</a>, come back, and hit the button again with new photos.</p><p class="small"><a class="instagram-button" download href="'+songURL(id)+'">Download your song</a> &nbsp; <a class="text-button" href="https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'-full.mp3" download>Full version</a></p>';}
+   let delivered=false;let deliveryNote='';
+   if(r&&r.ok){const d=await r.json().catch(()=>null);if(d){delivered=d.status==='audio_ready'||d.status==='delivered';}}
+   if(rd&&rd.ok){const dd=await rd.json().catch(()=>null);if(dd&&dd.delivery_status==='delivered'){deliveryNote=' <span class="delivery-ok">\u2713 Sent to your '+(dd.mode==='sms'?'phone':'email')+'</span>';}
+    else if(dd&&dd.delivery_status==='failed'){deliveryNote=' <span class="delivery-fail">Delivery pending \u2014 check back soon</span>';}}
+   if(delivered){clearInterval(timer);box.innerHTML='<h3>Your song is ready. \ud83c\udf89</h3>'+deliveryNote+'<audio controls autoplay src="'+songURL(id)+'"></audio><p class="small">Love it? Add another song for <b>$3</b> — <a href="https://buy.stripe.com/00w9AUbah8I9cP38ni14403" target="_blank" rel="noopener">grab the $3 follow-up</a>, come back, and hit the button again with new photos.</p><p class="small"><a class="instagram-button" download href="'+songURL(id)+'">Download your song</a> &nbsp; <a class="text-button" href="https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'-full.mp3" download>Full version</a></p>';}
    else if(n>(tries||90)){clearInterval(timer);box.innerHTML='<p class="small">Still forging — check back in a few minutes at this page, or email <a href="mailto:'+AS_EMAIL+'">'+AS_EMAIL+'</a> with your order ID.</p>';}
   }catch(e){}
  },4000);

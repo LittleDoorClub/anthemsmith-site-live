@@ -77,8 +77,17 @@ jobs:
                   return True
               print("claim race lost", oid, st); return False
 
-          # Accepted paid statuses — same set as forge payment gate
+          # Accepted paid statuses — same set as forge payment gate.
+          # Priority order: a verified payment marker (from a server-side
+          # Stripe event) beats a browser-claimed marker. This ordering
+          # prevents the bug where an "awaiting_payment" message arrives
+          # in the same ntfy poll batch as a later "paid" message and the
+          # paid message is silently skipped by oid deduplication.
           PAID_ACCEPTED = {"paid_claimed", "paid_stripe_return", "paid_verified", "paid"}
+          PAID_PRIORITY = {"paid": 5, "paid_verified": 4, "paid_stripe_return": 3,
+                           "paid_claimed": 2, "awaiting_payment": 1}
+          def paid_rank(ps):
+              return PAID_PRIORITY.get(str(ps).strip().lower(), 0)
 
           seen = set()
           for _ in range(3):
@@ -86,6 +95,8 @@ jobs:
                   with urllib.request.urlopen(
                       "https://ntfy.sh/as-anthemsmith-orders-v1/json?poll=1&since=12h",
                       timeout=30) as r:
+                      # -- COLLECT phase: gather all valid messages, group by oid --
+                      batch = {}  # oid -> best message + best paid_rank
                       for ln in r.read().decode().splitlines():
                           try:
                               e = json.loads(ln)
@@ -100,21 +111,29 @@ jobs:
                           oid = o.get("order_id")
                           if not oid or oid in seen:
                               continue
-                          seen.add(oid)
                           if not all(k in o for k in ("order_id", "email")):
                               print("skip malformed", oid); continue
                           ig = str(o.get("ig_url", "")).strip()
                           intake = str(o.get("intake", "link"))
                           if intake == "link" and not ig.startswith("https://www.instagram.com/"):
                               print("skip bad ig_url", oid); continue
-                          # screenshot/photos intake: forge runs on captions/details, no profile scrape needed
+                          # Keep the highest-priority paid_status message for each oid
+                          rank = paid_rank(o.get("paid_status", ""))
+                          existing = batch.get(oid)
+                          if existing is None or rank > existing[0]:
+                              batch[oid] = (rank, o)
+
+                      # -- DISPATCH phase: process best message per oid --
+                      for oid, (rank, o) in sorted(batch.items()):
+                          if len(seen) >= 5:
+                              break
+                          seen.add(oid)
                           paid_status = str(o.get("paid_status", "")).strip().lower()
                           if claim_order(oid, force=(paid_status in PAID_ACCEPTED)):
-                              # `intake` is consumed above; dropping it keeps client_payload ≤10 keys (GitHub cap)
                               dispatch_o = {k: v for k, v in o.items() if k != "intake"}
                               payload = {"event_type": "anthemsmith-order", "client_payload": dispatch_o}
                               st, d = gh_json("POST", f"{GH}/dispatches", payload)
-                              print("dispatched", oid, st, "keys=%d" % len(dispatch_o))
+                              print("dispatched", oid, st, "keys=%d paid=%s rank=%d" % (len(dispatch_o), paid_status, rank))
                           if len(seen) >= 5:
                               break
               except Exception as ex:
@@ -155,7 +174,7 @@ jobs:
           REFERENCE_URL: ${{ github.event.client_payload.reference_url || '' }}
         run: python scripts/forge_order.py
 
-      - name: Commit the delivered song
+      - name: Commit the delivered song and delivery status
         run: |
           git config user.name "anthemsmith-forge"
           git config user.email "forge@anthemsmith.com"
@@ -184,3 +203,12 @@ jobs:
           SMS_TO: ${{ github.event.client_payload.sms_to }}
           EMAIL: ${{ github.event.client_payload.email }}
         run: python scripts/deliver_song.py
+
+      - name: Commit delivery status
+        if: success()
+        run: |
+          git config user.name "anthemsmith-forge"
+          git config user.email "forge@anthemsmith.com"
+          git add songs/${{ github.event.client_payload.order_id }}.delivery.json 2>/dev/null || true
+          git commit -m "delivery ${{ github.event.client_payload.order_id }}" || echo "nothing to commit"
+          git push || echo "push skipped"
