@@ -20,10 +20,16 @@ FULL_URL = f"https://anthemsmith.com/songs/{OID}-full.mp3"
 LINK = FULL_URL  # full version is the deliverable
 
 # ---- delivery status tracking ----
-def write_delivery_status(status, detail=""):
+# Status values: submitted (provider accepted), delivered (terminal), failed (error)
+# SMS: Twilio returns "queued"/"sent" on POST — NOT terminal "delivered".
+# Email: Resend returns an id on POST — NOT proof of inbox delivery.
+# Record the provider's own reported status in detail so app.js can show it.
+def write_delivery_status(status, detail="", provider_status=""):
     """Write songs/<OID>.delivery.json so app.js can show notification outcome."""
     d = {"order_id": OID, "delivery_status": status, "ts": time.time(),
          "mode": DELIVERY, "detail": str(detail)[:120]}
+    if provider_status:
+        d["provider_status"] = str(provider_status)[:40]
     try:
         os.makedirs("songs", exist_ok=True)
         json.dump(d, open(f"songs/{OID}.delivery.json", "w"), indent=1)
@@ -86,8 +92,12 @@ if DELIVERY == "sms":
     else:
         try:
             result = sms_send(SMS_TO, msg)
-            write_delivery_status("delivered", result.get("sid") or "sms sent")
-            notify_gabe(f"\U0001f402 AS order {OID} delivered by SMS to {SMS_TO[:6]}*** — status {result.get('status')}")
+            # Twilio POST returns "queued" or "sent" — NOT terminal "delivered".
+            # Record as submitted with the provider status + SID for later lookup.
+            sid = result.get("sid", "")
+            pstat = result.get("status", "unknown")
+            write_delivery_status("submitted", f"twilio:{sid}", provider_status=pstat)
+            notify_gabe(f"\U0001f402 AS order {OID} SMS submitted to {SMS_TO[:6]}*** — Twilio {pstat} ({sid})")
         except Exception as e:
             write_delivery_status("failed", str(e)[:120])
             notify_gabe(f"\u26a0\ufe0f AS order {OID}: SMS FAILED ({str(e)[:80]}) — song at {LINK}")
@@ -103,7 +113,8 @@ elif DELIVERY == "email":
             result = email_send(EMAIL, "Your AnthemSmith song is ready \U0001f3b5",
                        f"Your song is ready!\n\nPlay / download: {LINK}\n\n30-second hook: {SONG_URL}\n\n"
                        f"Order ID: {OID}\nLove it? Add another song for $3 at https://anthemsmith.com\n\n\u2014 AnthemSmith")
-            write_delivery_status("delivered", result.get("id") or "email sent")
+            # Resend returns an id on POST — NOT proof of inbox delivery.
+            write_delivery_status("submitted", f"resend:{result.get('id', '')}", provider_status="sent")
             notify_gabe(f"\U0001f402 AS order {OID} delivered by EMAIL to {EMAIL}")
         except Exception as e:
             write_delivery_status("failed", str(e)[:120])
