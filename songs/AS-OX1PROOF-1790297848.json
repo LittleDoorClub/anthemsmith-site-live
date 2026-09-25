@@ -1,0 +1,23 @@
+{
+ "order_id": "AS-OX1PROOF-1790297848",
+ "status": "audio_ready",
+ "handle": null,
+ "category": "My Story",
+ "display_name": null,
+ "duration_full": 204.432,
+ "model": "V6",
+ "heart_anchor": "OX1 proof-of-life \u2014 relay dedupe + delivery contract + delivery.json separation",
+ "heart_anchor_source": "brief",
+ "reference": null,
+ "sources": {
+  "bio": false,
+  "captions_used": 0,
+  "alts_seen": 0,
+  "alt_lines_used": 0,
+  "details": true,
+  "anchor_source": "brief",
+  "render_status": null,
+  "render_chrome": null
+ },
+ "ingest_note": ""
+}
