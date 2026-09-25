@@ -1,0 +1,23 @@
+{
+ "order_id": "AS-OX1UPLOAD-1790344108",
+ "status": "audio_ready",
+ "handle": null,
+ "category": "Funny",
+ "display_name": null,
+ "duration_full": 204.672,
+ "model": "V6",
+ "heart_anchor": "OX1 upload-lane proof. Customer uploaded 5 photos of their dog wearing sunglasses at the beach. Captions: 'Maverick thinks he's too cool for school' 'Beach day with the best boy' 'Sunglasses at dawn' 'Who's a good boy? This guy' 'Living his best life'. Brief: make it fun and beachy, like a dog anthem.",
+ "heart_anchor_source": "brief",
+ "reference": null,
+ "sources": {
+  "bio": false,
+  "captions_used": 0,
+  "alts_seen": 0,
+  "alt_lines_used": 0,
+  "details": true,
+  "anchor_source": "brief",
+  "render_status": null,
+  "render_chrome": null
+ },
+ "ingest_note": ""
+}
