@@ -189,7 +189,7 @@ function payChoicePanel(values){
   // --- Step B: payment panel ---
   box.innerHTML='<span class="eyebrow">LAST STEP</span><h2>Lock in your song — $5</h2>'
   +'<div class="pay-grid">'
-  +'<div class="pay-card"><b>Pay with Card</b><p class="small">Apple Pay · Link · instant</p><a class="pay-link" href="https://buy.stripe.com/6oU5kE4LT9Md16lbzu14402?success_url=http%3A%2F%2Fanthemsmith.com%2F%3Fpaid%3D1" target="_blank" rel="noopener">Pay with Card</a></div>'
+  +'<div class="pay-card"><b>Pay with Card</b><p class="small">Apple Pay · Link · instant</p><a class="pay-link" href="https://buy.stripe.com/6oU5kE4LT9Md16lbzu14402?success_url='+encodeURIComponent('http://anthemsmith.com/?paid=1&oid='+data.request_id)+'" target="_blank" rel="noopener">Pay with Card</a></div>'
   +'<div class="pay-card"><b>Pay with Cash App</b><img class="pay-qr" src="assets/cashapp_qr_clean.jpg" alt="Cash App QR" width="220" height="220"><a class="pay-link" href="https://cash.app/$Gabrielmoneys/5" target="_blank" rel="noopener">Pay with Cash App</a></div>'
   +'<div class="pay-card"><b>Pay with Venmo</b><img class="pay-qr" src="assets/venmo_qr_clean.jpg" alt="Venmo QR" width="220" height="220"><a class="pay-link" href="https://venmo.com/?txn=pay&recipients=Gabriel-Tao&amount=5.00&note=AnthemSmith%20song" target="_blank" rel="noopener">Pay with Venmo</a></div>'
   +'</div>'
@@ -219,7 +219,7 @@ async function submitInstant(){
  payChoicePanel(values);
 }
 function resumeAfterPayment(){
- const raw=sessionStorage.getItem('anthemsmith_order');if(!raw)return false;
+ const raw=sessionStorage.getItem('anthemsmith_order')||(new URLSearchParams(location.search).get('oid')?JSON.stringify({request_id:new URLSearchParams(location.search).get('oid')}):null);if(!raw)return false;
  const data=JSON.parse(raw);sessionStorage.removeItem('anthemsmith_order');
  // Ask delivery here if the customer never picked one — never strand a paid song.
  if(!data.delivery || (!data.sms_to && !data.email)){
