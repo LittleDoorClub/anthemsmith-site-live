@@ -1,0 +1,7 @@
+{
+ "order_id": "AS-OX1PROOF-1790297848",
+ "delivery_status": "failed",
+ "ts": 1790298697.618873,
+ "mode": "email",
+ "detail": "HTTP Error 403: Forbidden"
+}
