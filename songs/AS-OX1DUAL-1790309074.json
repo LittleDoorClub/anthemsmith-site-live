@@ -1,0 +1,23 @@
+{
+ "order_id": "AS-OX1DUAL-1790309074",
+ "status": "audio_ready",
+ "handle": null,
+ "category": "My Story",
+ "display_name": null,
+ "duration_full": 204.024,
+ "model": "V6",
+ "heart_anchor": "OX1 dual-status relay test \u2014 PAID (should win over awaiting_payment)",
+ "heart_anchor_source": "brief",
+ "reference": null,
+ "sources": {
+  "bio": false,
+  "captions_used": 0,
+  "alts_seen": 0,
+  "alt_lines_used": 0,
+  "details": true,
+  "anchor_source": "brief",
+  "render_status": null,
+  "render_chrome": null
+ },
+ "ingest_note": ""
+}
