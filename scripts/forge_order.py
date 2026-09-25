@@ -183,6 +183,112 @@ style = band.get(CATEGORY, band["My Story"])
 # links via their free oEmbed/OG endpoints and extracts measurable metadata (title,
 # artist) for use as musical guidance. If resolution fails, the reference is recorded
 # unresolved in metadata — the model is never told it heard a URL it didn't hear.
+# ---- Measured reference analysis: genre inference + musical parameters ----
+# oEmbed gives title/artist (metadata). For measured musical guidance we
+# need BPM ranges, instrumentation hints, and production style — not just
+# a name. This lookup table infers genre from artist (exact match) and
+# falls back to the AnthemSmith category mapping.
+
+_GENRE_ARTISTS = {  # lowercase artist -> genre key
+    "slayer": "thrash_metal", "metallica": "thrash_metal", "megadeth": "thrash_metal",
+    "nirvana": "grunge", "pearl jam": "grunge", "soundgarden": "grunge",
+    "drake": "trap_rnb", "kendrick lamar": "conscious_rap", "j. cole": "conscious_rap",
+    "taylor swift": "pop_anthem", "billie eilish": "dark_pop", "olivia rodrigo": "pop_punk",
+    "the weeknd": "synth_rnb", "sza": "alt_rnb",
+    "daft punk": "french_house", "calvin harris": "edm", "avicii": "prog_house",
+    "adele": "piano_ballad", "ed sheeran": "acoustic_pop", "bruno mars": "funk_pop",
+    "beyonce": "rnb_anthem", "rihanna": "pop_rnb", "lady gaga": "electropop",
+    "travis scott": "trap", "playboi carti": "rage_rap",
+    "radiohead": "art_rock", "tame impala": "psych_pop",
+    "tyler the creator": "alt_hiphop", "frank ocean": "alt_rnb", "childish gambino": "funk_rap",
+    "bad bunny": "reggaeton", "bts": "kpop",
+    "kanye west": "chipmunk_soul", "jay-z": "east_coast",
+    "charli xcx": "hyperpop", "100 gecs": "hyperpop",
+    "bon iver": "indie_folk", "fleetwood mac": "classic_rock", "queen": "arena_rock",
+    "green day": "pop_punk", "blink-182": "pop_punk",
+    "lil wayne": "southern_rap", "future": "trap",
+    "ariana grande": "diva_pop", "dua lipa": "nu_disco", "doja cat": "pop_rap_fem",
+    "bob marley": "reggae", "the beatles": "brit_invasion", "pink floyd": "prog_rock",
+}
+
+_GENRE_PROFILES = {
+    "thrash_metal": {"name":"thrash metal","bpm_hint":"160-200 BPM aggressive double-kick",
+        "instruments":"distorted guitars, fast palm-muted riffs, screaming vocals",
+        "style_hint":"aggressive, dark, relentless energy"},
+    "grunge": {"name":"grunge","bpm_hint":"100-130 BPM sludgy mid-tempo",
+        "instruments":"fuzzy guitars, heavy bass, raw-strained vocals",
+        "style_hint":"angsty, raw, quiet-loud dynamics"},
+    "trap_rnb": {"name":"trap R&B","bpm_hint":"120-140 BPM half-time hi-hats",
+        "instruments":"808 bass, atmospheric pads, autotuned vocals",
+        "style_hint":"moody, nocturnal, minimal"},
+    "conscious_rap": {"name":"conscious rap","bpm_hint":"80-95 BPM boom-bap swing",
+        "instruments":"soul samples, warm bass, crisp snares",
+        "style_hint":"reflective, storytelling, jazz-influenced"},
+    "dark_pop": {"name":"dark pop","bpm_hint":"60-80 BPM sparse minimal",
+        "instruments":"sub bass, whispered vocals, ASMR textures",
+        "style_hint":"intimate, eerie, bass-driven"},
+    "synth_rnb": {"name":"synth R&B","bpm_hint":"90-110 BPM retro drum machines",
+        "instruments":"analog synths, reverb-drenched falsetto",
+        "style_hint":"cinematic, nocturnal, 80s-influenced"},
+    "pop_anthem": {"name":"pop anthem","bpm_hint":"120-130 BPM four-on-floor",
+        "instruments":"sparkling synths, layered vocals, big drums",
+        "style_hint":"euphoric, stadium-sized, bright"},
+    "french_house": {"name":"French house","bpm_hint":"120-128 BPM filter sweeps",
+        "instruments":"disco samples, sidechain compression, vocoder",
+        "style_hint":"groovy, filtered, dancefloor"},
+    "prog_house": {"name":"progressive house","bpm_hint":"125-130 BPM builds",
+        "instruments":"saw synths, piano leads, big drops",
+        "style_hint":"euphoric, anthemic, festival"},
+    "pop_punk": {"name":"pop punk","bpm_hint":"160-200 BPM double-time",
+        "instruments":"power chords, fast drums, nasal vocals",
+        "style_hint":"energetic, youthful, catchy"},
+    "reggaeton": {"name":"reggaeton","bpm_hint":"90-100 BPM dembow rhythm",
+        "instruments":"dembow beat, synth brass, Spanish vocals",
+        "style_hint":"rhythmic, danceable, Caribbean"},
+    "kpop": {"name":"K-pop","bpm_hint":"100-130 BPM genre-blending",
+        "instruments":"layered synths, rap verses, polished vocals",
+        "style_hint":"high-energy, maximalist, choreographed"},
+    "hyperpop": {"name":"hyperpop","bpm_hint":"140-180 BPM glitchy",
+        "instruments":"pitched vocals, distorted bass, chipmunk edits",
+        "style_hint":"maximalist, digital, chaotic"},
+    "alt_rnb": {"name":"alternative R&B","bpm_hint":"70-90 BPM slow-burn",
+        "instruments":"ambient textures, falsetto, minimal drums",
+        "style_hint":"atmospheric, introspective, experimental"},
+    "trap": {"name":"trap","bpm_hint":"130-150 BPM triplets",
+        "instruments":"808s, rapid hi-hats, ad-libs",
+        "style_hint":"hard-hitting, dark, rhythmic"},
+    "indie_folk": {"name":"indie folk","bpm_hint":"70-90 BPM fingerpicked",
+        "instruments":"acoustic guitar, falsetto, brass swells",
+        "style_hint":"warm, organic, nostalgic"},
+    "funk_pop": {"name":"funk pop","bpm_hint":"105-115 BPM tight groove",
+        "instruments":"slap bass, horn section, rhythmic guitar",
+        "style_hint":"groovy, upbeat, danceable"},
+    "arena_rock": {"name":"arena rock","bpm_hint":"120-140 BPM stomp-clap",
+        "instruments":"anthemic guitars, crowd vocals, big drums",
+        "style_hint":"stadium-sized, singalong, triumphant"},
+    "nu_disco": {"name":"nu-disco","bpm_hint":"110-120 BPM four-on-floor",
+        "instruments":"funky bass, string stabs, falsetto",
+        "style_hint":"glamorous, danceable, retro-futuristic"},
+}
+
+_CATEGORY_GENRE = {"My Story":"conscious_rap","Funny":"pop_anthem","Couples":"synth_rnb","Friendship":"pop_anthem"}
+
+def _infer_genre(artist, track, category):
+    """Infer measurable musical parameters from artist name or category fallback.
+    Returns dict with name, bpm_hint, instruments, style_hint — or None."""
+    if artist:
+        key = artist.lower().strip()
+        if key in _GENRE_ARTISTS:
+            return _GENRE_PROFILES[_GENRE_ARTISTS[key]]
+        for ak, gk in _GENRE_ARTISTS.items():
+            if key in ak or ak in key:
+                return _GENRE_PROFILES[gk]
+    cat_genre = _CATEGORY_GENRE.get(category)
+    if cat_genre and cat_genre in _GENRE_PROFILES:
+        return _GENRE_PROFILES[cat_genre]
+    return None
+
+
 reference_title = None
 reference_artist = None
 reference_resolved = False
@@ -243,6 +349,13 @@ if REFERENCE_URL:
             reference_title = ref_meta.get("title")
             reference_artist = ref_meta.get("artist")
             reference_resolved = True
+            # Measured analysis: genre inference from artist → BPM, instruments
+            ref_genre = _infer_genre(reference_artist, ref_meta.get("track", ""), CATEGORY)
+            if ref_genre:
+                style += f", {ref_genre['bpm_hint']}, {ref_genre['instruments']}, {ref_genre['style_hint']}"
+                ref_meta["genre"] = ref_genre["name"]
+                ref_meta["bpm_range"] = ref_genre["bpm_hint"]
+                ref_meta["style_analysis"] = ref_genre["style_hint"]
         else:
             ref_meta["resolution"] = ref_meta.get("resolution") or "could not resolve metadata"
             # Don't append garbage to style — just flag it
