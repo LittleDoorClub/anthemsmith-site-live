@@ -162,46 +162,6 @@ jobs:
           pip install instaloader --quiet
           sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
 
-      - name: Grant anon upload access to Supabase storage
-        env:
-          SUPABASE_URL: https://veqpmdsiqcjjpxgcubrp.supabase.co
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: |
-          python3 -c "
-          import urllib.request, json
-          url = '${SUPABASE_URL}'.rstrip('/')
-          key = '${SUPABASE_SERVICE_ROLE_KEY}'
-          grant = 'GRANT EXECUTE ON FUNCTION public.nyx_upload_audio_b64(text,text,text) TO anon'
-          
-          req = urllib.request.Request(f'{url}/rest/v1/rpc/gabs_gpt_run_sql')
-          req.add_header('apikey', key)
-          req.add_header('Authorization', f'Bearer {key}')
-          req.add_header('Content-Type', 'application/json')
-          req.method = 'POST'
-          req.data = json.dumps({'p_query': grant}).encode()
-          
-          try:
-              resp = urllib.request.urlopen(req, timeout=15)
-              print(f'GRANT response: {resp.read().decode()[:200]}')
-          except Exception as e:
-              # gabs_gpt_run_sql blocks DDL — try direct via http extension
-              print(f'gabs_gpt_run_sql blocked DDL (expected): {e}')
-              
-              # Alternative: use the http extension function if available
-              alt_sql = \"SELECT net.http_post(url := '\" + url + \"/rest/v1/rpc/gabs_grant_sql', headers := jsonb_build_object('apikey', '\" + key + \"', 'Authorization', 'Bearer '\" + key + \"', 'Content-Type', 'application/json'), body := jsonb_build_object('p_query', '\" + grant + \"')::text) FROM pg_sleep(0)\"
-              req2 = urllib.request.Request(f'{url}/rest/v1/rpc/gabs_gpt_run_sql')
-              req2.add_header('apikey', key)
-              req2.add_header('Authorization', f'Bearer {key}')
-              req2.add_header('Content-Type', 'application/json') 
-              req2.method = 'POST'
-              req2.data = json.dumps({'p_query': alt_sql}).encode()
-              try:
-                  resp2 = urllib.request.urlopen(req2, timeout=15)
-                  print(f'Alt GRANT: {resp2.read().decode()[:200]}')
-              except Exception as e2:
-                  print(f'Alt GRANT failed: {e2}')
-          "
-
       - name: "Forge song: scrape, measure, lyrics, Suno, QC"
         env:
           MUAPI_KEY: ${{ secrets.MUAPI_KEY }}
@@ -216,6 +176,9 @@ jobs:
           EMAIL: ${{ github.event.client_payload.order.email }}
           PAID_STATUS: ${{ github.event.client_payload.order.paid_status }}
           REFERENCE_URL: ${{ github.event.client_payload.order.reference_url || '' }}
+          PHOTO_URLS: ${{ join(github.event.client_payload.order.photo_urls || '', ',') }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python scripts/forge_order.py
 
       - name: Commit the delivered song and delivery status
