@@ -4,7 +4,43 @@ Runs on GitHub Actions. Reads ORDER_ID/IG_URL/CATEGORY/MOOD/VOICE/DETAILS from e
 Writes songs/<order_id>.mp3 (30s hook) + songs/<order_id>-full.mp3 + songs/<order_id>.json.
 Anti-hallucination: only text visible on the public profile (bio + recent captions) is used;
 unknown facts stay null. No logged-in access anywhere."""
-import json, os, re, sys, time, hashlib, subprocess, urllib.request
+import json, os, re, sys, time, hashlib, subprocess, threading, urllib.request
+
+# ============================================================
+# PAYMENT GATE (top of forge — before ANY scrape/generation).
+# The relay poller forwards the order payload's paid field verbatim
+# as client_payload; the workflow exposes it to us as PAID_STATUS.
+# Accepted verified-payment markers are exactly the values app.js writes
+# on the paid/claimed code paths. Anything else (missing, empty, or the
+# pay-panel-open 'awaiting_payment') MUST NOT forge: a song that was never
+# paid for must not be generated, committed, or shipped.
+# ============================================================
+PAID_ACCEPTED = ("paid_claimed", "paid_stripe_return", "paid_verified", "paid")
+PAID_STATUS = (os.environ.get("PAID_STATUS") or "").strip().lower()
+
+def reject_unpaid(reason):
+    """Write the <OID>.failed.json signal and stop the run RED.
+    NEVER writes songs/<OID>.json: that is the DELIVERED signal the
+    customer page polls, and writing it for an unpaid order would fake
+    'your song is ready' AND permanently block the retry via the relay
+    poller's claim_order() delivered-check."""
+    oid = os.environ.get("ORDER_ID", "UNKNOWN")
+    out = "songs"
+    os.makedirs(out, exist_ok=True)
+    json.dump({"order_id": oid, "status": "failed", "reason": reason},
+              open(f"{out}/{oid}.failed.json", "w"))
+    print("PAYMENT-GATE REJECTED", oid, "paid_status=%r" % PAID_STATUS, flush=True)
+    sys.exit(3)
+
+if os.environ.get("AS_FORGE_OVERRIDE") == "1":
+    print("PAYMENT-GATE overridden (manual forge)", flush=True)
+elif PAID_STATUS not in PAID_ACCEPTED:
+    reject_unpaid("no verified payment marker (paid_status=%r; accepted=%s)"
+                  % (PAID_STATUS, ",".join(PAID_ACCEPTED)))
+
+if os.environ.get("AS_PAYMENT_GATE_TEST") == "1":
+    print("PAYMENT-GATE ACCEPTED", os.environ.get("ORDER_ID"), "paid_status=%r" % PAID_STATUS, flush=True)
+    sys.exit(0)
 
 OUT = "songs"
 os.makedirs(OUT, exist_ok=True)
@@ -15,10 +51,45 @@ MOOD = os.environ.get("MOOD", "")
 VOICE = (os.environ.get("VOICE") or "Surprise me").strip()
 DETAILS = os.environ.get("DETAILS", "")
 MUAPI = os.environ["MUAPI_KEY"]
+REFERENCE_URL = (os.environ.get("REFERENCE_URL") or "").strip()
 
 def die(msg):
-    json.dump({"order_id": OID, "status": "failed", "reason": msg}, open(f"{OUT}/{OID}.json", "w"))
+    # NEVER write <OID>.json on failure: songs/<OID>.json is the DELIVERED signal.
+    # app.js's order poll celebrated on r.ok alone, and the relay poller's
+    # claim_order() skips any order whose <OID>.json exists -> a failed record
+    # would both fake a "Your song is ready" and permanently block the retry.
+    # Failure records now live beside the delivered signal, mirroring the
+    # AS-ANCHOR-GATE <OID>.blocked.json pattern (never the polled path).
+    json.dump({"order_id": OID, "status": "failed", "reason": msg},
+              open(f"{OUT}/{OID}.failed.json", "w"))
     sys.exit(1)
+
+# ---------- HARD FORGE WATCHDOG (2026-09-26) ----------
+# The forge job's `timeout-minutes: 20` CANCELS the run, and a cancel bypasses
+# die() / reject_unpaid() entirely: no songs/<OID>.failed.json, no song, no
+# delivery -- the only trace is a `cancelled` run whose duration equals the cap
+# (measured on PAID order AS-MUHOETYD: 20m17s then 20m16s). A deadline INSIDE the
+# cap guarantees a failure record and a bounded run no matter which step hangs
+# (Instagram scrape / Suno poll / CDN download).
+FORGE_DEADLINE_S = int(os.environ.get("AS_FORGE_DEADLINE_S", "840"))  # 14 min < 20 min cap
+
+
+def _deadline_hit():
+    try:
+        json.dump({"order_id": OID, "status": "failed",
+                   "reason": "forge deadline %ds exceeded (a step hung; run bounded by watchdog)"
+                             % FORGE_DEADLINE_S},
+                  open(f"{OUT}/{OID}.failed.json", "w"))
+        print("FORGE DEADLINE HIT (%ds) — wrote %s/%s.failed.json; exiting hard"
+              % (FORGE_DEADLINE_S, OUT, OID), flush=True)
+    except Exception as exc:
+        print("FORGE DEADLINE HIT — could not write marker: %r" % (exc,), flush=True)
+    os._exit(4)
+
+
+_watchdog = threading.Timer(FORGE_DEADLINE_S, _deadline_hit)
+_watchdog.daemon = True  # the watchdog itself must never be joined at exit
+_watchdog.start()
 
 # ---------- 1. INGEST (public profile only) ----------
 def fetch(url, timeout=25):
@@ -29,31 +100,126 @@ def fetch(url, timeout=25):
 handle = None
 bio = ""
 captions = []
+alt_texts = []
+alt_lines = []
+display_name = ""
+ingest_note = ""
+render_status = None
+render_chrome = None
+ig_ingest = None  # file-intake orders never enter the IG branch; pick_anchor gate below must not NameError
 if IG_URL:
     m = re.search(r"instagram\.com/([A-Za-z0-9_.]+)/?", IG_URL)
     if not m:
         die("bad instagram url")
     handle = m.group(1)
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     try:
-        html = fetch(f"https://www.instagram.com/{handle}/").decode("utf-8", "ignore")
-        # public metadata only: og:description carries bio + recent caption snippets
-        md = re.search(r'<meta property="og:description" content="([^"]*)"', html)
-        t = re.search(r'<meta property="og:title" content="([^"]*)"', html)
-        bio = (md.group(1) if md else "")
-        full = (t.group(1) if t else "") + " | " + bio
-        caps = re.findall(r'"caption":"([^"]{15,220})"', html) or re.findall(r'edge_media_to_caption.*?"text":"([^"]{15,220})"', html)
-        captions = [c.encode().decode("unicode_escape", "ignore") for c in caps[:12]]
-    except Exception as e:
-        # public profile unreachable (private/deleted/blocked): fall back to details-only brief
-        bio, captions = "", []
+        import ig_ingest
+    except Exception:
+        ig_ingest = None
+    html = ""
+    render_status = None
+    render_chrome = None
+    if ig_ingest is not None:
+        # STAGE 1.5.a ANCHOR — try instaloader (mobile API) first.
+        # The mobile API doesn't login-wall; headless Chrome does on cloud IPs.
+        info_il = None
+        if hasattr(ig_ingest, "scrape_instaloader"):
+            # STAGE 1.5.a bound (2026-09-26). A hung instaloader 429-retry loop must
+            # NEVER block the forge. `ThreadPoolExecutor.__exit__` calls
+            # shutdown(wait=True) BEFORE the except handler, so result(timeout=60)
+            # could not BOUND the run: the handler (and the Chrome fallback) ran only
+            # after the worker finished. Measured: a 1 s timeout on a 6 s worker
+            # returned at 6.0 s, and with a 60 s worker the handler had still not run
+            # when the run was killed. In production (PAID order AS-MUHOETYD,
+            # 2026-09-26) instaloader logged
+            #   "JSON Query to api/v1/users/web_profile_info/: 429 Too Many Requests
+            #    [retrying; skip with ^C]"  at 01:54:40Z and again at 02:05:47Z, then
+            #   "##[error]The operation was canceled." at 02:14:09Z (~20m17s), with
+            # songs/<OID>.json 404 and songs/<OID>.failed.json 404 -- the customer paid
+            # and got nothing, and it repeated on every poll cycle (3x by 02:28Z).
+            # A DAEMON thread is NOT joined at interpreter exit, so a stuck scrape now
+            # degrades to the Chrome / static fallback instead of hanging the run.
+            _box = {}
 
-sources = {"handle": handle, "bio": bio, "captions": captions, "details": DETAILS, "category": CATEGORY, "mood": MOOD}
+            def _scrape():
+                try:
+                    _box["info"] = ig_ingest.scrape_instaloader(handle)
+                except Exception:
+                    _box["info"] = None
+
+            _t = threading.Thread(target=_scrape, name="ig-scrape", daemon=True)
+            _t.start()
+            _t.join(timeout=45)
+            info_il = _box.get("info")
+            if info_il is None:
+                print("instaloader timeout/error (daemon thread, never joined) — "
+                      "falling through to headless Chrome", flush=True)
+        if info_il:
+            info = info_il
+            render_status = info_il.get("render_status") or "posts"
+            html = "<instaloader>"  # marker: no DOM needed downstream
+            # extract fields directly (mobile API returns structured data, no ingest needed)
+            bio = info_il.get("bio") or ""
+            captions = info_il.get("captions") or []
+            alt_texts = []   # mobile API returns no alt-text
+            alt_lines = info_il.get("alt_lines") or []
+            display_name = info_il.get("display_name") or ""
+            print("RENDER handle=%s method=instaloader status=%s captions=%d" % (handle, render_status, len(captions)), flush=True)
+        else:
+            # Fall back to headless Chrome — the original path.
+            # render_handle_detail ALSO reports WHY a render produced nothing
+            # (no_renderer / login_wall / empty / bad_handle): those causes are not
+            # interchangeable, and folding them into one string is what made an
+            # empty live order read as "the customer's profile is private".
+            if hasattr(ig_ingest, "render_handle_detail"):
+                rd = ig_ingest.render_handle_detail(handle)
+                html = rd.get("html") or ""
+                render_status = rd.get("status")
+                render_chrome = rd.get("chrome")
+                print("RENDER handle=%s status=%s bytes=%s chrome=%s head=%r"
+                      % (handle, render_status, rd.get("bytes"), render_chrome,
+                         (rd.get("head") or "").replace("\n", " ")[:160]), flush=True)
+            else:
+                html = ig_ingest.render_handle(handle) or ""
+    if not html:
+        try:
+            html = fetch(f"https://www.instagram.com/{handle}/").decode("utf-8", "ignore")
+            ingest_note = "headless renderer unavailable: static shell read"
+        except Exception:
+            html = ""
+            ingest_note = "profile unreachable (private/deleted/blocked)"
+    if not html and not render_status:
+        render_status = "unavailable"
+    if ig_ingest is not None and html and not html.startswith("<instaloader"):
+        try:
+            info = ig_ingest.ingest(html, handle, render_status=render_status)
+        except TypeError:  # an older ig_ingest revision: never crash the lane
+            info = ig_ingest.ingest(html, handle)
+        bio = info["bio"] or ""
+        captions = info["captions"]
+        alt_texts = info["alt_texts"]
+        alt_lines = info.get("alt_lines") or []
+        display_name = info["display_name"] or ""
+        if info["notes"]:
+            ingest_note = (ingest_note + "; " if ingest_note else "") + "; ".join(info["notes"])
+    elif html:
+        # ig_ingest missing (never expected): keep an OG-title read only. The
+        # og:description count line is NOT a bio and NOT a caption.
+        t = re.search(r'<meta property="og:title" content="([^"]*)"', html)
+        display_name = (t.group(1) if t else "")
+
+sources = {"handle": handle, "bio": bio, "captions": captions, "alts": alt_texts,
+           "alt_lines": alt_lines,
+           "details": DETAILS, "category": CATEGORY, "mood": MOOD, "note": ingest_note,
+           "render_status": render_status, "render_chrome": render_chrome}
 
 # ---------- 2. VIBE READ (only what is visible; unknown stays null) ----------
-name = handle or ""
+name = display_name or handle or ""
 lines = []
 if bio: lines.append(bio)
 lines += captions
+lines += alt_lines
 if DETAILS: lines.append(DETAILS)
 corpus = " / ".join(lines)
 words = re.findall(r"[A-Za-z']{4,}", corpus.lower())
@@ -66,17 +232,253 @@ band = {"My Story": "boom-bap hip-hop, 92 BPM, dusty drums, warm bass, confident
         "Couples": "warm retro soul, 90 BPM, electric piano, buttery bass, intimate duet feel",
         "Friendship": "bouncy indie groove, 100 BPM, plucked riff, gang vocals, joyful male vocal"}
 style = band.get(CATEGORY, band["My Story"])
+
+# Reference resolution: the old path appended a raw URL to the style prompt as if
+# the model could listen to it. MuAPI custom_mode=true does NOT support audio_urls,
+# so the URL string was meaningless noise. This replacement resolves YouTube/Spotify
+# links via their free oEmbed/OG endpoints and extracts measurable metadata (title,
+# artist) for use as musical guidance. If resolution fails, the reference is recorded
+# unresolved in metadata — the model is never told it heard a URL it didn't hear.
+# ---- Measured reference analysis: genre inference + musical parameters ----
+# oEmbed gives title/artist (metadata). For measured musical guidance we
+# need BPM ranges, instrumentation hints, and production style — not just
+# a name. This lookup table infers genre from artist (exact match) and
+# falls back to the AnthemSmith category mapping.
+
+_GENRE_ARTISTS = {  # lowercase artist -> genre key
+    "slayer": "thrash_metal", "metallica": "thrash_metal", "megadeth": "thrash_metal",
+    "nirvana": "grunge", "pearl jam": "grunge", "soundgarden": "grunge",
+    "drake": "trap_rnb", "kendrick lamar": "conscious_rap", "j. cole": "conscious_rap",
+    "taylor swift": "pop_anthem", "billie eilish": "dark_pop", "olivia rodrigo": "pop_punk",
+    "the weeknd": "synth_rnb", "sza": "alt_rnb",
+    "daft punk": "french_house", "calvin harris": "edm", "avicii": "prog_house",
+    "adele": "piano_ballad", "ed sheeran": "acoustic_pop", "bruno mars": "funk_pop",
+    "beyonce": "rnb_anthem", "rihanna": "pop_rnb", "lady gaga": "electropop",
+    "travis scott": "trap", "playboi carti": "rage_rap",
+    "radiohead": "art_rock", "tame impala": "psych_pop",
+    "tyler the creator": "alt_hiphop", "frank ocean": "alt_rnb", "childish gambino": "funk_rap",
+    "bad bunny": "reggaeton", "bts": "kpop",
+    "kanye west": "chipmunk_soul", "jay-z": "east_coast",
+    "charli xcx": "hyperpop", "100 gecs": "hyperpop",
+    "bon iver": "indie_folk", "fleetwood mac": "classic_rock", "queen": "arena_rock",
+    "green day": "pop_punk", "blink-182": "pop_punk",
+    "lil wayne": "southern_rap", "future": "trap",
+    "ariana grande": "diva_pop", "dua lipa": "nu_disco", "doja cat": "pop_rap_fem",
+    "bob marley": "reggae", "the beatles": "brit_invasion", "pink floyd": "prog_rock",
+}
+
+_GENRE_PROFILES = {
+    "thrash_metal": {"name":"thrash metal","bpm_hint":"160-200 BPM aggressive double-kick",
+        "instruments":"distorted guitars, fast palm-muted riffs, screaming vocals",
+        "style_hint":"aggressive, dark, relentless energy"},
+    "grunge": {"name":"grunge","bpm_hint":"100-130 BPM sludgy mid-tempo",
+        "instruments":"fuzzy guitars, heavy bass, raw-strained vocals",
+        "style_hint":"angsty, raw, quiet-loud dynamics"},
+    "trap_rnb": {"name":"trap R&B","bpm_hint":"120-140 BPM half-time hi-hats",
+        "instruments":"808 bass, atmospheric pads, autotuned vocals",
+        "style_hint":"moody, nocturnal, minimal"},
+    "conscious_rap": {"name":"conscious rap","bpm_hint":"80-95 BPM boom-bap swing",
+        "instruments":"soul samples, warm bass, crisp snares",
+        "style_hint":"reflective, storytelling, jazz-influenced"},
+    "dark_pop": {"name":"dark pop","bpm_hint":"60-80 BPM sparse minimal",
+        "instruments":"sub bass, whispered vocals, ASMR textures",
+        "style_hint":"intimate, eerie, bass-driven"},
+    "synth_rnb": {"name":"synth R&B","bpm_hint":"90-110 BPM retro drum machines",
+        "instruments":"analog synths, reverb-drenched falsetto",
+        "style_hint":"cinematic, nocturnal, 80s-influenced"},
+    "pop_anthem": {"name":"pop anthem","bpm_hint":"120-130 BPM four-on-floor",
+        "instruments":"sparkling synths, layered vocals, big drums",
+        "style_hint":"euphoric, stadium-sized, bright"},
+    "french_house": {"name":"French house","bpm_hint":"120-128 BPM filter sweeps",
+        "instruments":"disco samples, sidechain compression, vocoder",
+        "style_hint":"groovy, filtered, dancefloor"},
+    "prog_house": {"name":"progressive house","bpm_hint":"125-130 BPM builds",
+        "instruments":"saw synths, piano leads, big drops",
+        "style_hint":"euphoric, anthemic, festival"},
+    "pop_punk": {"name":"pop punk","bpm_hint":"160-200 BPM double-time",
+        "instruments":"power chords, fast drums, nasal vocals",
+        "style_hint":"energetic, youthful, catchy"},
+    "reggaeton": {"name":"reggaeton","bpm_hint":"90-100 BPM dembow rhythm",
+        "instruments":"dembow beat, synth brass, Spanish vocals",
+        "style_hint":"rhythmic, danceable, Caribbean"},
+    "kpop": {"name":"K-pop","bpm_hint":"100-130 BPM genre-blending",
+        "instruments":"layered synths, rap verses, polished vocals",
+        "style_hint":"high-energy, maximalist, choreographed"},
+    "hyperpop": {"name":"hyperpop","bpm_hint":"140-180 BPM glitchy",
+        "instruments":"pitched vocals, distorted bass, chipmunk edits",
+        "style_hint":"maximalist, digital, chaotic"},
+    "alt_rnb": {"name":"alternative R&B","bpm_hint":"70-90 BPM slow-burn",
+        "instruments":"ambient textures, falsetto, minimal drums",
+        "style_hint":"atmospheric, introspective, experimental"},
+    "trap": {"name":"trap","bpm_hint":"130-150 BPM triplets",
+        "instruments":"808s, rapid hi-hats, ad-libs",
+        "style_hint":"hard-hitting, dark, rhythmic"},
+    "indie_folk": {"name":"indie folk","bpm_hint":"70-90 BPM fingerpicked",
+        "instruments":"acoustic guitar, falsetto, brass swells",
+        "style_hint":"warm, organic, nostalgic"},
+    "funk_pop": {"name":"funk pop","bpm_hint":"105-115 BPM tight groove",
+        "instruments":"slap bass, horn section, rhythmic guitar",
+        "style_hint":"groovy, upbeat, danceable"},
+    "arena_rock": {"name":"arena rock","bpm_hint":"120-140 BPM stomp-clap",
+        "instruments":"anthemic guitars, crowd vocals, big drums",
+        "style_hint":"stadium-sized, singalong, triumphant"},
+    "nu_disco": {"name":"nu-disco","bpm_hint":"110-120 BPM four-on-floor",
+        "instruments":"funky bass, string stabs, falsetto",
+        "style_hint":"glamorous, danceable, retro-futuristic"},
+}
+
+_CATEGORY_GENRE = {"My Story":"conscious_rap","Funny":"pop_anthem","Couples":"synth_rnb","Friendship":"pop_anthem"}
+
+def _infer_genre(artist, track, category):
+    """Infer measurable musical parameters from artist name or category fallback.
+    Returns dict with name, bpm_hint, instruments, style_hint — or None."""
+    if artist:
+        key = artist.lower().strip()
+        if key in _GENRE_ARTISTS:
+            return _GENRE_PROFILES[_GENRE_ARTISTS[key]]
+        for ak, gk in _GENRE_ARTISTS.items():
+            if key in ak or ak in key:
+                return _GENRE_PROFILES[gk]
+    cat_genre = _CATEGORY_GENRE.get(category)
+    if cat_genre and cat_genre in _GENRE_PROFILES:
+        return _GENRE_PROFILES[cat_genre]
+    return None
+
+
+reference_title = None
+reference_artist = None
+reference_resolved = False
+if REFERENCE_URL:
+    ref_meta = {"url": REFERENCE_URL}
+    try:
+        ref_lower = REFERENCE_URL.lower()
+        # YouTube oEmbed — free, no API key, returns title in JSON
+        if "youtube.com/watch" in ref_lower or "youtu.be/" in ref_lower:
+            import re as _re
+            vid = None
+            for pat in (_re.compile(r'[?&]v=([^&]+)'), _re.compile(r'youtu\.be/([^?&]+)')):
+                m = pat.search(REFERENCE_URL)
+                if m:
+                    vid = m.group(1); break
+            if vid:
+                oembed_url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={vid}&format=json"
+                try:
+                    oembed = json.loads(fetch(oembed_url, timeout=10).decode())
+                    ref_meta["title"] = oembed.get("title")
+                    ref_meta["provider"] = "youtube"
+                    # YouTube titles are often "Artist — Song Title"; split if possible
+                    full_title = oembed.get("title", "")
+                    if " — " in full_title:
+                        parts = full_title.split(" — ", 1)
+                        ref_meta["artist"] = parts[0].strip()
+                        ref_meta["track"] = parts[1].strip()
+                    elif " - " in full_title:
+                        parts = full_title.split(" - ", 1)
+                        ref_meta["artist"] = parts[0].strip()
+                        ref_meta["track"] = parts[1].strip()
+                    else:
+                        ref_meta["artist"] = None
+                        ref_meta["track"] = full_title
+                except Exception:
+                    ref_meta["oembed_error"] = "unreachable"
+
+        # Spotify oEmbed — free, no API key
+        elif "open.spotify.com/track" in ref_lower or "spotify.link" in ref_lower:
+            try:
+                oembed_url = f"https://open.spotify.com/oembed?url={urllib.parse.quote(REFERENCE_URL, safe='')}"
+                oembed = json.loads(fetch(oembed_url, timeout=10).decode())
+                ref_meta["title"] = oembed.get("title")
+                ref_meta["provider"] = "spotify"
+                ref_meta["artist"] = None
+                ref_meta["track"] = oembed.get("title")
+            except Exception:
+                ref_meta["oembed_error"] = "unreachable"
+        else:
+            ref_meta["resolution"] = "domain not supported — no oEmbed endpoint known"
+
+        # Build style guidance from resolved metadata
+        if ref_meta.get("title"):
+            ref_desc = ref_meta.get("track") or ref_meta["title"]
+            if ref_meta.get("artist"):
+                ref_desc = f"{ref_meta['artist']} — {ref_desc}"
+            style += f", in the spirit of: {ref_desc}"
+            reference_title = ref_meta.get("title")
+            reference_artist = ref_meta.get("artist")
+            reference_resolved = True
+            # Measured analysis: genre inference from artist → BPM, instruments
+            ref_genre = _infer_genre(reference_artist, ref_meta.get("track", ""), CATEGORY)
+            if ref_genre:
+                style += f", {ref_genre['bpm_hint']}, {ref_genre['instruments']}, {ref_genre['style_hint']}"
+                ref_meta["genre"] = ref_genre["name"]
+                ref_meta["bpm_range"] = ref_genre["bpm_hint"]
+                ref_meta["style_analysis"] = ref_genre["style_hint"]
+        else:
+            ref_meta["resolution"] = ref_meta.get("resolution") or "could not resolve metadata"
+            # Don't append garbage to style — just flag it
+    except Exception as ex:
+        ref_meta["resolution_error"] = str(ex)[:80]
+    ref_meta["resolved"] = reference_resolved
+    # Note: ref_meta is not used directly below but its values feed reference_title/artist/resolved
+else:
+    ref_meta = None
+
 if "hip" in corpus or "gym" in corpus: style = band["My Story"]
 
-# ---------- 4. LYRICS (heart anchor = most specific visible line; anti-cliche) ----------
-anchor = captions[0][:90] if captions else (bio[:90] if bio else (DETAILS[:90] or f"{name} is one of the real ones"))
+# ---------- 4. LYRICS (heart anchor = most specific VISIBLE line; anti-cliche) ----------
+# F1 fence: no verbatim source -> NO anchor. Never synthesise a fallback string
+# (the old code shipped f"{name} is one of the real ones" and follower-count
+# lines as the customer's chorus -- an invented line with zero sources).
+if ig_ingest is not None:
+    anchor, anchor_src = ig_ingest.pick_anchor(captions, alt_lines, DETAILS, handle)
+elif captions:
+    anchor, anchor_src = captions[0].strip(), "ig-caption"
+elif DETAILS:
+    # file-intake orders: the customer's own brief words ARE verbatim source
+    anchor, anchor_src = DETAILS.strip(), "brief"
+else:
+    anchor, anchor_src = None, None
+
+# ---------- 4b. SHIP GATE -- no heart anchor, no ship (house law) ----------
+# Measured on this lane 2026-09-17: order AS-ANCHORPROOF1 committed
+# songs/AS-ANCHORPROOF1.json with heart_anchor=null and status="delivered".
+# The F1 fence stopped this lane INVENTING a line; nothing stopped it SHIPPING
+# without one, and app.js treats the EXISTENCE of songs/<id>.json as "Your song
+# is ready" -- so a committed anchorless build is a broken product in front of a
+# paying customer.
+# The gate fires BEFORE the paid generation (a song that must not ship must not
+# cost $0.10 either) and exits non-zero: the run goes RED, no song is committed,
+# and the customer page keeps waiting instead of celebrating a missing mp3. It
+# is re-attempted on the next tick and self-heals the moment the profile becomes
+# readable. The blocked record is written to <OID>.blocked.json -- NEVER
+# <OID>.json, which the customer page polls.
+if not anchor:
+    reason = ("no verbatim, source-backed line was readable -- refusing to "
+              "invent the customer's chorus (house law: no heart anchor => no "
+              "ship). render_status=" + str(render_status))
+    blocked = {"order_id": OID, "status": "blocked_no_anchor", "reason": reason,
+               "handle": handle, "category": CATEGORY, "mood": MOOD,
+               "display_name": display_name or None,
+               "duration_full": None, "model": None,
+               "heart_anchor": None, "heart_anchor_source": None,
+               "sources": {"bio": bool(bio), "captions_used": len(captions),
+                           "alts_seen": len(alt_texts),
+                           "alt_lines_used": len(alt_lines),
+                           "details": bool(DETAILS), "anchor_source": None,
+                           "render_status": render_status,
+                           "render_chrome": render_chrome},
+               "ingest_note": ingest_note}
+    json.dump(blocked, open(f"{OUT}/{OID}.blocked.json", "w"), indent=1)
+    print("BLOCKED", OID, "-", reason, flush=True)
+    sys.exit(2)
+
 banned = r"\b(forever|always|journey|unbreakable|shine bright|dreams come true|heart of gold)\b"
 def clean(s): return re.sub(banned, "real", s, flags=re.I)
 
 v1 = clean(f"They say {name} keeps it real, ask the regulars how it feels," if name else "Some folks just carry the room, from the first hello to the last song,")
 v2 = clean(corpus[:160]) if corpus else "Every detail says the same thing, the real ones know it's true,"
 pre = "And when the moment came, they didn't even flinch,"
-chorus = clean(f"{anchor} — that's the whole story, that's the anthem right here,")
+chorus = clean(f"{anchor} — that's the whole story, that's the anthem right here," if anchor
+               else "Say it plain, say it loud, this one's yours and it's true,")
 chorus2 = clean(f"Put it on the speaker, let the whole block hear, {name}, this one's yours,")
 
 lyrics = f"""[Verse 1]
@@ -125,6 +527,7 @@ def poll(rid, max_s=840):
     return {"status": "timeout"}
 
 gender = "male" if VOICE.lower().startswith("m") else ("female" if VOICE.lower().startswith("f") else "male")
+model_used = "V6"
 sub = post({"prompt": lyrics, "style": style, "title": f"AnthemSmith {OID}", "custom_mode": True,
             "instrumental": False, "vocal_gender": gender, "model": "V6", "duration": 205,
             "negative_tags": "sad, ballad, piano lead, cheesy, autotune"})
@@ -134,6 +537,7 @@ d = res.get("data") or res
 outs = d.get("outputs") or []
 if not outs:
     # V6 422-style fallback: one V4_5 shot
+    model_used = "V4_5"
     sub = post({"prompt": lyrics, "style": style, "title": f"AnthemSmith {OID}", "custom_mode": True,
                 "instrumental": False, "vocal_gender": gender, "model": "V4_5",
                 "negative_tags": "sad, ballad, piano lead, cheesy, autotune"})
@@ -162,8 +566,19 @@ subprocess.run(["ffmpeg", "-y", "-ss", str(start), "-t", "30", "-i", f"{OUT}/{OI
 os.replace(f"{OUT}/{OID}-t1.mp3", f"{OUT}/{OID}-full.mp3")
 os.remove(f"{OUT}/{OID}-t1v.mp3")
 
-meta = {"order_id": OID, "status": "delivered", "handle": handle, "category": CATEGORY,
-        "duration_full": dur, "model": "V6" if outs else "V4_5", "heart_anchor": anchor,
-        "sources": {"bio": bool(bio), "captions_used": len(captions), "details": bool(DETAILS)}}
+meta = {"order_id": OID, "status": "audio_ready", "handle": handle, "category": CATEGORY,
+        "display_name": display_name or None,
+        "duration_full": dur, "model": model_used,
+        "heart_anchor": anchor, "heart_anchor_source": anchor_src,
+        "reference": {"url": REFERENCE_URL or None, 
+                      "resolved": reference_resolved,
+                      "title": reference_title, 
+                      "artist": reference_artist} if REFERENCE_URL else None,
+        "sources": {"bio": bool(bio), "captions_used": len(captions),
+                    "alts_seen": len(alt_texts), "alt_lines_used": len(alt_lines),
+                    "details": bool(DETAILS), "anchor_source": anchor_src,
+                    "render_status": render_status,
+                    "render_chrome": render_chrome},
+        "ingest_note": ingest_note}
 json.dump(meta, open(f"{OUT}/{OID}.json", "w"), indent=1)
-print("DELIVERED", OID, dur)
+print("DELIVERED", OID, dur, "anchor=", (anchor or "(none)")[:60], "src=", anchor_src)
