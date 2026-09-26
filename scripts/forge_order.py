@@ -98,7 +98,13 @@ if IG_URL:
         # The mobile API doesn't login-wall; headless Chrome does on cloud IPs.
         info_il = None
         if hasattr(ig_ingest, "scrape_instaloader"):
-            info_il = ig_ingest.scrape_instaloader(handle)
+            import concurrent.futures
+            try:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                    info_il = ex.submit(ig_ingest.scrape_instaloader, handle).result(timeout=60)
+            except (concurrent.futures.TimeoutError, Exception):
+                info_il = None
+                print("instaloader timeout or error — falling through to headless Chrome", flush=True)
         if info_il:
             info = info_il
             render_status = info_il.get("render_status") or "posts"
