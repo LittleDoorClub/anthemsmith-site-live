@@ -27,7 +27,7 @@ LINK = FULL_URL  # full version is the deliverable
 def write_delivery_status(status, detail="", provider_status=""):
     """Write songs/<OID>.delivery.json so app.js can show notification outcome."""
     d = {"order_id": OID, "delivery_status": status, "ts": time.time(),
-         "mode": DELIVERY, "detail": str(detail)[:120]}
+         "mode": DELIVERY, "detail": str(detail)[:400]}
     if provider_status:
         d["provider_status"] = str(provider_status)[:40]
     try:
@@ -54,8 +54,19 @@ def email_send(to, subject, text):
     req = urllib.request.Request("https://api.resend.com/emails",
         data=data, method="POST",
         headers={"Authorization": "Bearer " + RESEND, "Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        d = json.load(r)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            d = json.load(r)
+    except urllib.error.HTTPError as e:
+        # Capture Resend's JSON error body — it names the exact reason
+        # (domain_not_verified / missing_permissions / invalid_key) vs the
+        # useless bare "HTTP Error 403: Forbidden" from str(e) alone.
+        body = ""
+        try:
+            body = e.read().decode("utf-8", "replace")
+        except Exception:
+            pass
+        raise RuntimeError(f"resend {e.code} {body[:200]}") from e
     print(f"EMAIL -> {to}: {d}")
     return {"status": "sent", "id": d.get("id"), "provider": "resend"}
 
@@ -117,8 +128,8 @@ elif DELIVERY == "email":
             write_delivery_status("submitted", f"resend:{result.get('id', '')}", provider_status="sent")
             notify_gabe(f"\U0001f402 AS order {OID} delivered by EMAIL to {EMAIL}")
         except Exception as e:
-            write_delivery_status("failed", str(e)[:120])
-            notify_gabe(f"\u26a0\ufe0f AS order {OID}: EMAIL FAILED ({str(e)[:80]}) — song at {LINK}")
+            write_delivery_status("failed", str(e)[:400])
+            notify_gabe(f"\u26a0\ufe0f AS order {OID}: EMAIL FAILED ({str(e)[:120]}) — song at {LINK}")
             print("delivery error:", e)
 
 else:
