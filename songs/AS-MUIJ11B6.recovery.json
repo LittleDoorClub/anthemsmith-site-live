@@ -1,0 +1,24 @@
+{
+  "order_id": "AS-MUIJ11B6",
+  "incident": "Photo upload lane — bytes never left browser. Forge received empty IG_URL, DETAILS, REFERENCE_URL.",
+  "customer_payment": "$5 Venmo — payment confirmed (email notification located), no buyer contact available",
+  "forge": {
+    "run": "36253190570",
+    "job": "108434955217",
+    "status": "failure",
+    "exit_code": 2,
+    "created": "2026-09-26T15:47:57Z",
+    "failure_reason": "no anchor — no Instagram URL, no text details, no photos received"
+  },
+  "containment": {
+    "deployed": "2026-09-26T18:22:00Z",
+    "commit": "99c3eb7",
+    "description": "Storefront paused — all new purchases blocked. Existing customers: contact @AnthemSmith with order ID."
+  },
+  "recovery": {
+    "status": "pending_customer_contact",
+    "updated": "2026-09-26T18:25:00Z",
+    "notes": "Customer must reach out via Instagram DM or email. Venmo does not expose buyer contact. Site banner + paused message directs customer to @AnthemSmith."
+  },
+  "customer_message_template": "Hi! We found your order AS-MUIJ11B6 from Thursday. You uploaded photos and made a $5 Venmo payment, but our photo upload had a bug — the files never reached our system (they stayed on your phone). Your payment is 100% safe. We'd love to make your song! Just reply here with your photos (or an Instagram link) and any captions/details you want included. We'll get it done right away. — AnthemSmith"
+}
