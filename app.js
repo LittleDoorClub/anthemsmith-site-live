@@ -170,7 +170,41 @@ function watchOrder(id,box,tries){
  },4000);
 }
 function payChoicePanel(values){showOrderingPaused();}
-async function submitInstant(){showOrderingPaused();}
+async function uploadPhotosToNtfy(files){
+ const urls=[];
+ for(const file of files){
+  const resp=await fetch('https://ntfy.sh/as-anthemsmith-photos',{method:'PUT',headers:{'Title':'AS-PHOTO','Filename':file.name,'Tags':'camera'},body:file});
+  if(!resp.ok)throw new Error('Upload failed: '+resp.status);
+  const j=await resp.json();
+  urls.push(j.attachment.url);
+ }
+ return urls;
+}
+async function submitInstant(){
+ if(AS_ORDERING_PAUSED){showOrderingPaused();return}
+ const files=selectedIntakeFiles();
+ if(files.length>0){
+  const box=$('#brief');box.hidden=false;
+  box.innerHTML='<p class="small">Uploading '+files.length+' photo(s)...</p>';
+  let photoUrls=[];
+  try{photoUrls=await uploadPhotosToNtfy(files)}catch(e){
+   box.innerHTML='<p class="small">Photo upload failed: '+e.message+'</p>';return
+  }
+  box.innerHTML='<p class="small">Photos uploaded — preparing order...</p>';
+  const values=requestData();
+  values.photo_urls=photoUrls;values.intake=activeLane();
+  values.file_count=String(files.length);
+  sessionStorage.setItem('anthemsmith_order',JSON.stringify(values));
+  payChoicePanel(values);
+  return;
+ }
+ // No photos — IG link flow
+ const values=Object.fromEntries(Array.from(new FormData($('#songForm'))).filter(([,v])=>typeof v==='string'));
+ const hasLink=!!values.instagram1;
+ if(!hasLink){$('#brief').hidden=false;$('#brief').innerHTML='<p class="small">Give us a way in — an Instagram link, a grid screenshot, or up to 10 photos. Any one works.</p>';return}
+ values.intake='link';
+ payChoicePanel(values);
+}
 function resumeAfterPayment(){
  // Viewing an existing order is read-only. A return URL does not prove payment.
  let data={};
