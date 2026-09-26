@@ -53,7 +53,8 @@ def email_send(to, subject, text):
                        "to": [to], "subject": subject, "text": text}).encode()
     req = urllib.request.Request("https://api.resend.com/emails",
         data=data, method="POST",
-        headers={"Authorization": "Bearer " + RESEND, "Content-Type": "application/json"})
+        headers={"Authorization": "Bearer " + RESEND, "Content-Type": "application/json",
+                 "User-Agent": "AnthemSmith/1.0 (python-urllib)"})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             d = json.load(r)
