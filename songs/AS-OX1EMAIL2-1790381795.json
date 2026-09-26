@@ -1,0 +1,23 @@
+{
+ "order_id": "AS-OX1EMAIL2-1790381795",
+ "status": "audio_ready",
+ "handle": null,
+ "category": "My Story",
+ "display_name": null,
+ "duration_full": 204.0,
+ "model": "V6",
+ "heart_anchor": "OX1 email-lane verify \u2014 User-Agent fix",
+ "heart_anchor_source": "brief",
+ "reference": null,
+ "sources": {
+  "bio": false,
+  "captions_used": 0,
+  "alts_seen": 0,
+  "alt_lines_used": 0,
+  "details": true,
+  "anchor_source": "brief",
+  "render_status": null,
+  "render_chrome": null
+ },
+ "ingest_note": ""
+}
