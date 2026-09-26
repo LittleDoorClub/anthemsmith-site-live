@@ -213,6 +213,13 @@ async function submitInstant(){
  const laneText=(values['laneDetails'+({'link':0,screenshot:1,photos:2}[lane])]||'').trim();
  const parts=[(values.details||'').trim(),laneText].filter(Boolean);
  values.details=parts.join('\n\n');
+ // FIX 09-26 (ox): when there's no IG link, the forge has nothing to scrape.
+ // Photos do not leave the browser (Blob-only), so text details ARE the anchor.
+ // Require the customer to describe what is in their photos before we fire.
+ if(!hasLink && !values.details.trim()){
+   $('#brief').hidden=false;
+   $('#brief').innerHTML='<p class="small">Tell us about the screenshots or photos you uploaded. What is in them? The story, mood, or moment they capture — a few words is all the muse needs.</p>';return
+ }
  values.intake=lane;
  values.file_count=hasFiles?String(selectedIntakeFiles().length):'0';
  // email dropped (Gabe 09-16): delivery is on-page download, no inbox needed
