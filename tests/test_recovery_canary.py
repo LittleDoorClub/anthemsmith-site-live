@@ -66,6 +66,30 @@ class ScopeTests(unittest.TestCase):
         with self.assertRaisesRegex(c.CanaryError, 'table_not_allowed'):
             c.request('vault.decrypted_secrets')
 
+    def test_live_analysis_calls_real_intake_function_and_verifies_private_provenance(self):
+        import sys
+        from types import SimpleNamespace
+        script_dir = str(Path(c.__file__).resolve().parent)
+        sys.path.insert(0, script_dir)
+        import photo_intake
+        row = {'order_id': OID, 'status': 'source_received'}
+        upload = {'order_id': OID, 'status': 'ready', 'object_path': OID + '/fixture.png', 'sha256': 'b' * 64}
+        analysis = {'bytes': 70, 'width': 4, 'height': 5,
+                    'result': {'observations': ['synthetic red circle'], 'visible_text': []}}
+        persisted = {'id': 'fixture-analysis', 'source_sha256': 'b' * 64,
+                     'object_path': upload['object_path'], 'provider_request_id': 'fixture-request',
+                     'model': 'fixture-model', 'analysis': analysis}
+        with patch.object(c, 'inspect', return_value=(row, [upload])), \
+             patch.object(c, 'request', return_value=[persisted]), \
+             patch.object(c, 'order', return_value=row), \
+             patch.object(photo_intake, 'intake_photos', return_value=SimpleNamespace(analysis=[analysis])) as intake, \
+             patch.dict(os.environ, {'SUPABASE_SERVICE_ROLE_KEY': 'fixture-key', 'OPENAI_API_KEY': 'fixture-vision'}):
+            result = c.analyze(OID)
+        intake.assert_called_once_with([upload['object_path']], OID, c.ORIGIN, 'fixture-key', 'fixture-vision')
+        self.assertEqual(result['stored_images_examined'], 1)
+        self.assertTrue(result['readback'])
+        self.assertFalse(result['music_generated'])
+
     def test_revocation_preserves_payment_and_source_rows(self):
         row = {'order_id': OID, 'payment_state': 'unverified', 'payment_ref': None,
                'brief': {'synthetic_acceptance': True}, 'delivery': {},
