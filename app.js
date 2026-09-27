@@ -133,42 +133,107 @@ function blockedStatusURL(id){return 'https://raw.githubusercontent.com/'+GH_OWN
 function failedStatusURL(id){return 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'.failed.json'}
 function songURL(id){return 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'-full.mp3'}
 function recoveryStatusURL(id){return 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'.recovery.json'}
+function deliveryStatusURL(id){return 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'.delivery.json'}
+const orderWatchers=new WeakMap();
+async function readOrderStatus(url){
+ const controller=new AbortController();
+ const timer=setTimeout(()=>controller.abort(),12000);
+ try{
+  const response=await fetch(url+'?t='+Date.now(),{cache:'no-store',signal:controller.signal});
+  if(!response.ok)return {ok:false,data:null};
+  const data=await response.json();
+  if(!data||typeof data!=='object'||Array.isArray(data))return null;
+  return {ok:true,data};
+ }catch{return null}finally{clearTimeout(timer)}
+}
+function notificationText(id,receipt){
+ if(!receipt||receipt.order_id!==id)return 'Notification delivery has not been confirmed.';
+ if(receipt.delivery_status==='delivered'&&receipt.provider_status==='delivered')return 'Notification delivery confirmed.';
+ if(receipt.delivery_status==='submitted')return 'Notification submitted; delivery is not yet confirmed.';
+ if(receipt.delivery_status==='failed')return 'Your notification could not be delivered. You can still use the player when the audio loads.';
+ return 'Notification delivery has not been confirmed.';
+}
+function renderExistingSong(id,box,receipt,isCurrent){
+ const full=songURL(id);
+ box.innerHTML='<h3 data-order-title>Loading your full song.</h3><p data-order-audio-status role="status" aria-live="polite">Checking that this browser can play the audio.</p><audio controls preload="auto" aria-label="Your full AnthemSmith song"></audio><p><a data-song-download hidden href="'+full+'" download>Download the full song</a></p><p data-order-notification class="small"></p><p data-order-help hidden>Order '+id+'. If loading still fails, contact <a href="https://www.instagram.com/anthemsmith/" target="_blank" rel="noopener">@AnthemSmith</a> or email <a href="mailto:'+AS_EMAIL+'">'+AS_EMAIL+'</a>. <strong>Do not pay again.</strong></p><button data-retry-audio type="button" hidden>Retry loading this song</button>';
+ const audio=box.querySelector('audio'),title=box.querySelector('[data-order-title]'),status=box.querySelector('[data-order-audio-status]'),download=box.querySelector('[data-song-download]'),help=box.querySelector('[data-order-help]'),retry=box.querySelector('[data-retry-audio]');
+ box.querySelector('[data-order-notification]').textContent=notificationText(id,receipt);
+ title.textContent='Loading your full song.';
+ download.hidden=true;help.hidden=true;retry.hidden=true;
+ let timer,mediaState='loading';
+ const loadingSlow=()=>{
+  if(!isCurrent()||mediaState!=='loading')return;
+  clearTimeout(timer);
+  title.textContent='Your song is still loading.';
+  status.textContent='The connection is taking longer than expected. You can retry without placing another order.';
+  download.hidden=true;help.hidden=false;retry.hidden=false;
+ };
+ const playable=()=>{
+  if(!isCurrent())return;
+  mediaState='playable';clearTimeout(timer);
+  title.textContent='Your song is ready.';
+  status.textContent='Audio loaded in this browser. Press play or download the full song.';
+  download.hidden=false;help.hidden=true;retry.hidden=true;
+ };
+ const failed=()=>{
+  if(!isCurrent())return;
+  mediaState='failed';clearTimeout(timer);
+  title.textContent='We could not load your song.';
+  status.textContent='The audio could not be loaded or decoded. Retrying here does not charge you or create another order.';
+  download.hidden=true;help.hidden=false;retry.hidden=false;
+ };
+ const retryRead=()=>{if(isCurrent()){retry.disabled=true;watchOrder(id,box)}};
+ audio.addEventListener('canplay',playable);audio.addEventListener('playing',playable);
+ audio.addEventListener('error',failed);audio.addEventListener('stalled',loadingSlow);
+ retry.addEventListener('click',retryRead);
+ timer=setTimeout(loadingSlow,15000);
+ // Attach listeners before the browser can begin fetching or decoding.
+ audio.src=full;
+ return ()=>{clearTimeout(timer);audio.pause();audio.removeEventListener('canplay',playable);audio.removeEventListener('playing',playable);audio.removeEventListener('error',failed);audio.removeEventListener('stalled',loadingSlow);retry.removeEventListener('click',retryRead)};
+}
 async function fireOrder(data){
  throw new Error('New orders are temporarily paused. Existing customers: do not pay again.');
 }
 function watchOrder(id,box,tries){
  if(typeof id!=='string'||!/^AS-[A-Z0-9-]{1,64}$/.test(id)){showOrderingPaused();return}
+ const previous=orderWatchers.get(box);if(previous)previous.cancel();
+ const state={active:true,busy:false,timer:null,dispose:null,cancel(){this.active=false;clearInterval(this.timer);if(this.dispose)this.dispose()}};
+ orderWatchers.set(box,state);
+ const current=()=>state.active&&orderWatchers.get(box)===state;
  box.innerHTML='<p class="small">Checking order '+id+'. Do not pay again.</p>';
  let n=0;
- const timer=setInterval(async()=>{
-  n++;
+ state.timer=setInterval(async()=>{
+  if(!current()||state.busy)return;
+  state.busy=true;n++;
   try{
-   const [r,rb,rf,rr]=await Promise.all([
-    fetch(orderStatusURL(id)+'?t='+Date.now()).catch(()=>null),
-    fetch(blockedStatusURL(id)+'?t='+Date.now()).catch(()=>null),
-    fetch(failedStatusURL(id)+'?t='+Date.now()).catch(()=>null),
-    fetch(recoveryStatusURL(id)+'?t='+Date.now()).catch(()=>null)
+   const [r,rb,rf,rr,rd]=await Promise.all([
+    readOrderStatus(orderStatusURL(id)),
+    readOrderStatus(blockedStatusURL(id)),
+    readOrderStatus(failedStatusURL(id)),
+    readOrderStatus(recoveryStatusURL(id)),
+    readOrderStatus(deliveryStatusURL(id))
    ]);
-   const manifest=r&&r.ok?await r.json().catch(()=>null):null;
-   // An old failure marker must not hide audio that is already ready.
+   const manifest=r&&r.ok?r.data:null;
+   const receipt=rd&&rd.ok?rd.data:null;
+   if(!current())return;
+   // Keep existing audio despite stale failures; only media events prove browser playability.
    if(manifest&&['audio_ready','delivered'].includes(manifest.status)){
-    clearInterval(timer);
-    const full=songURL(id);
-    box.innerHTML='<h3>Your song is ready.</h3><p>Your song is available here. You can play or download it below.</p><audio controls src="'+full+'"></audio><p><a href="'+full+'" download>Download the full song</a></p>';
+    clearInterval(state.timer);
+    state.dispose=renderExistingSong(id,box,receipt,current);
     return;
    }
    if((rb&&rb.ok)||(rf&&rf.ok)||(rr&&rr.ok)){
-    clearInterval(timer);
+    clearInterval(state.timer);
     box.innerHTML='<h3>We need to recover your order.</h3><p>We could not finish order '+id+'. Please contact <a href="https://www.instagram.com/anthemsmith/" target="_blank" rel="noopener">@AnthemSmith</a> or email <a href="mailto:'+AS_EMAIL+'">'+AS_EMAIL+'</a> with this order ID. <strong>Do not pay again.</strong></p>';
     return;
    }
    if(n>(tries||90)){
-    clearInterval(timer);
+    clearInterval(state.timer);
     box.innerHTML='<p>Order '+id+' is taking longer than expected. Contact @AnthemSmith or <a href="mailto:'+AS_EMAIL+'">'+AS_EMAIL+'</a> with your order ID. Do not pay again.</p>';
    }
   }catch{
-   if(n>(tries||90)){clearInterval(timer);showOrderingPaused()}
-  }
+   if(current()&&n>(tries||90)){clearInterval(state.timer);showOrderingPaused()}
+  }finally{state.busy=false}
  },4000);
 }
 function payChoicePanel(values){showOrderingPaused();}
@@ -183,6 +248,7 @@ function resumeAfterPayment(){
  if(typeof id!=='string'||!/^AS-[A-Z0-9-]{1,64}$/.test(id)){showOrderingPaused();return false}
  const box=$('#brief');box.hidden=false;
  watchOrder(id,box);
+ box.scrollIntoView({block:'start',behavior:'auto'});
  return true;
 }
 window.addEventListener('load',()=>{
