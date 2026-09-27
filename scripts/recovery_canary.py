@@ -99,8 +99,8 @@ def analyze(oid):
     row, uploads = inspect(oid)
     if row['status'] != 'source_received' or not uploads or any(r['status'] != 'ready' for r in uploads):
         raise CanaryError('canary_sources_not_ready')
-    from photo_intake import intake_photos
-    result = intake_photos([r['object_path'] for r in uploads], oid, ORIGIN,
+    from photo_intake import inspect_private_sources
+    result = inspect_private_sources([r['object_path'] for r in uploads], oid, ORIGIN,
                            os.environ['SUPABASE_SERVICE_ROLE_KEY'], os.environ['OPENAI_API_KEY'])
     persisted = request('anthemsmith_recovery_analyses', {'order_id': 'eq.' + oid,
         'select': 'id,order_id,object_path,source_sha256,model,provider_request_id,analysis'})

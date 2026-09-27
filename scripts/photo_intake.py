@@ -141,13 +141,17 @@ def _rest(http, origin, key, table, query, body=None):
         raise PhotoIntakeError("private_order_store_unavailable") from None
 
 
-def _verified_sources(http, origin, key, order_id, paths):
+def _verified_sources(http, origin, key, order_id, paths, require_paid=True):
+    # Source validation may run before checkout; paid generation must not.
+    if type(require_paid) is not bool:
+        raise PhotoIntakeError("invalid_source_gate_mode")
     query = urllib.parse.urlencode({"order_id": "eq." + order_id,
         "select": "order_id,status,payment_state", "limit": "2"})
     orders = _rest(http, origin, key, "anthemsmith_recovery_orders", query)
     if (len(orders) != 1 or orders[0].get("order_id") != order_id or
             orders[0].get("status") != "source_received" or
-            orders[0].get("payment_state") != "verified_paid"):
+            (require_paid and orders[0].get("payment_state") != "verified_paid") or
+            orders[0].get("payment_state") not in ("unverified", "verified_paid")):
         raise PhotoIntakeError("order_not_verified_paid_with_sources")
     query = urllib.parse.urlencode({"order_id": "eq." + order_id, "status": "eq.ready",
         "select": "order_id,object_path,status,byte_size,mime_type,sha256", "limit": "11"})
@@ -166,7 +170,7 @@ class PhotoResult:
     analysis: list
 
 
-def intake_photos(references, order_id, supabase_url, service_key, openai_key, http=_http):
+def _intake_photos(references, order_id, supabase_url, service_key, openai_key, http, require_paid):
     """Read all durable images first; complete all vision or fail the whole job.
 
     No raw customer photo, contact or key is logged. Returned analysis
@@ -186,7 +190,7 @@ def intake_photos(references, order_id, supabase_url, service_key, openai_key, h
     keys = [_object_key(value, order_id) for value in references]
     if len(set(keys)) != len(keys):
         raise PhotoIntakeError("duplicate_photo_reference")
-    registered = _verified_sources(http, supabase_url, service_key, order_id, keys)
+    registered = _verified_sources(http, supabase_url, service_key, order_id, keys, require_paid=require_paid)
 
     durable = []
     total = 0
@@ -262,6 +266,16 @@ def intake_photos(references, order_id, supabase_url, service_key, openai_key, h
         ocr_texts=[" / ".join(v["text"].strip() for v in item["result"]["visible_text"]
                              if v["confidence"] == "high") for item in analysis],
         storage_paths=[item["storage_path"] for item in analysis], analysis=analysis)
+
+
+def intake_photos(references, order_id, supabase_url, service_key, openai_key, http=_http):
+    """Paid worker entrypoint. Payment is still required and cannot be disabled by dispatch."""
+    return _intake_photos(references, order_id, supabase_url, service_key, openai_key, http, True)
+
+
+def inspect_private_sources(references, order_id, supabase_url, service_key, openai_key, http=_http):
+    """Server-only source suitability before checkout: never verifies payment or generates music."""
+    return _intake_photos(references, order_id, supabase_url, service_key, openai_key, http, False)
 
 
 def persist_composition(order_id, photo_analysis, song, supabase_url, service_key, http=_http):

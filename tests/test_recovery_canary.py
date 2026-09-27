@@ -82,7 +82,7 @@ class ScopeTests(unittest.TestCase):
         with patch.object(c, 'inspect', return_value=(row, [upload])), \
              patch.object(c, 'request', return_value=[persisted]), \
              patch.object(c, 'order', return_value=row), \
-             patch.object(photo_intake, 'intake_photos', return_value=SimpleNamespace(analysis=[analysis])) as intake, \
+             patch.object(photo_intake, 'inspect_private_sources', return_value=SimpleNamespace(analysis=[analysis])) as intake, \
              patch.dict(os.environ, {'SUPABASE_SERVICE_ROLE_KEY': 'fixture-key', 'OPENAI_API_KEY': 'fixture-vision'}):
             result = c.analyze(OID)
         intake.assert_called_once_with([upload['object_path']], OID, c.ORIGIN, 'fixture-key', 'fixture-vision')
