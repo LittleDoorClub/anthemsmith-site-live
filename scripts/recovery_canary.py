@@ -164,6 +164,78 @@ def revoke(oid):
     return {'stage': 'revoke', 'order_id': oid, 'revoked': True, 'payment_state': 'unverified'}
 
 
+def reservation_test(oid, reserve=None, read_receipt=None):
+    """Race the real notification CAS only on an expired, unpaid, recipient-free canary.
+
+    Never invokes deliver(), provider send(), generation or vision. Conditional cleanup
+    can remove only this test's own unchanged reservation; it never clears another actor.
+    """
+    if not re.fullmatch(r'AS-OX-CANARY-[A-Z0-9-]{6,40}', oid):
+        raise CanaryError('synthetic_namespace_required')
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    import uuid
+    from order_workflow import reserve_notification, private_delivery, GateError
+    reserve = reserve or reserve_notification
+    read_receipt = read_receipt or private_delivery
+    before, uploads = inspect(oid)
+    if dt.datetime.fromisoformat(before['expires_at']) >= dt.datetime.now(dt.timezone.utc):
+        raise CanaryError('canary_must_be_revoked')
+    if before.get('delivery_result') != {}:
+        raise CanaryError('canary_outbox_not_empty')
+    invariant_fields = ('order_id', 'status', 'payment_state', 'payment_ref', 'brief', 'delivery',
+                        'token_sha256', 'token_issued_at', 'expires_at')
+    expected = {k: before.get(k) for k in invariant_fields}
+    attempts = [str(uuid.uuid4()), str(uuid.uuid4())]
+    barrier = threading.Barrier(2)
+    def race(attempt):
+        barrier.wait(timeout=10)
+        try:
+            value = reserve(oid, attempt)
+            return {'attempt_id': attempt, 'won': True, 'value': value}
+        except GateError as exc:
+            if str(exc) != 'notification_reservation_unverified':
+                raise CanaryError('unexpected_reservation_failure') from None
+            return {'attempt_id': attempt, 'won': False}
+    cleaned = False
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(race, attempts))
+        winners = [x for x in outcomes if x['won']]
+        if len(winners) != 1:
+            raise CanaryError('reservation_winner_count_mismatch')
+        saved = read_receipt(oid)
+        intended = {'order_id': oid, 'delivery_status': 'sending', 'attempt_id': winners[0]['attempt_id']}
+        if saved != intended or winners[0]['value'] != intended:
+            raise CanaryError('reservation_winner_readback_mismatch')
+    finally:
+        # Fail closed if any customer/payment/context/token/source field changed.
+        current, current_uploads = inspect(oid)
+        if {k: current.get(k) for k in invariant_fields} != expected or current_uploads != uploads:
+            raise CanaryError('canary_context_changed_do_not_clear')
+        saved = read_receipt(oid)
+        own = {'order_id': oid, 'delivery_status': 'sending', 'attempt_id': saved.get('attempt_id')}
+        if saved and (saved.get('attempt_id') not in attempts or saved != own):
+            raise CanaryError('foreign_reservation_do_not_clear')
+        if saved:
+            changed = request('anthemsmith_recovery_orders', {
+                'order_id': 'eq.' + oid, 'payment_state': 'eq.unverified', 'payment_ref': 'is.null',
+                'delivery': 'eq.{}', 'delivery_result': 'eq.' + json.dumps(saved, separators=(',', ':'))},
+                method='PATCH', body={'delivery_result': {}})
+            if len(changed) != 1 or changed[0].get('delivery_result') != {}:
+                raise CanaryError('reservation_cleanup_cas_failed')
+        final, final_uploads = inspect(oid)
+        if (read_receipt(oid) != {} or final.get('delivery_result') != {} or
+                {k: final.get(k) for k in invariant_fields} != expected or final_uploads != uploads):
+            raise CanaryError('reservation_cleanup_readback_failed')
+        cleaned = True
+    return {'stage': 'reservation-test', 'order_id': oid, 'contenders': 2, 'winners': len(winners),
+            'losers': len(outcomes) - len(winners), 'private_readback': True, 'cleanup_readback': cleaned,
+            'customer_context_unchanged': True, 'payment_state': 'unverified',
+            'capability_still_revoked': True, 'model_called': False,
+            'music_generated': False, 'notification_sent': False}
+
+
 def main():
     event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text(encoding='utf-8'))
     inputs = event.get('inputs', {})
@@ -180,6 +252,8 @@ def main():
                   'payment_state': row['payment_state'], 'uploads': uploads}
     elif action == 'revoke':
         result = revoke(oid)
+    elif action == 'reservation-test':
+        result = reservation_test(oid)
     else:
         raise CanaryError('unsupported_action')
     Path('canary-evidence.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
