@@ -7,6 +7,8 @@ exported as a GitHub Actions step environment variable.
 """
 import json
 import os
+import hashlib
+import uuid
 from pathlib import Path
 import re
 import subprocess
@@ -62,6 +64,15 @@ def record_blocked(root, oid, reason):
     })
 
 
+class NoStoreRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        raise GateError("private_store_redirect_refused")
+
+
+def store_open(request, timeout=30):
+    return urllib.request.build_opener(NoStoreRedirect()).open(request, timeout=timeout)
+
+
 def rest(table, params):
     key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
     if not key:
@@ -71,7 +82,7 @@ def rest(table, params):
         headers={"Authorization": "Bearer " + key, "apikey": key})
     try:
         # Origin and tables are fixed; only URL-encoded filters come from validated data.
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with store_open(request, timeout=30) as response:
             raw = response.read(512 * 1024 + 1)
             if len(raw) > 512 * 1024:
                 raise ValueError("too large")
@@ -99,6 +110,10 @@ def canonical_order(oid, read=rest):
     if (row.get("payment_state") != "verified_paid" or not isinstance(row.get("payment_ref"), str)
             or not row["payment_ref"].strip() or len(row["payment_ref"]) > 500):
         raise GateError("payment_not_verified")
+    payments = read(ORDER_TABLE, {"payment_ref": "eq." + row["payment_ref"],
+        "payment_state": "eq.verified_paid", "select": "order_id", "limit": "2"})
+    if len(payments) != 1 or payments[0].get("order_id") != oid:
+        raise GateError("payment_reference_reused_or_unverifiable")
     if row.get("status") != "source_received":
         raise GateError("sources_not_received")
     brief, delivery = row.get("brief"), row.get("delivery")
@@ -131,7 +146,8 @@ def canonical_order(oid, read=rest):
     mode = string_field(delivery, "mode", 10)
     if not mode:
         mode = "email" if email and not phone else "sms" if phone and not email else ""
-    delivery_valid = (mode == "email" and email_valid) or (mode == "sms" and phone_valid)
+    delivery_valid = ((mode == "email" and email_valid and not phone) or
+                      (mode == "sms" and phone_valid and not email))
     return {"order_id": oid, "intake": intake, "photo_urls": sorted(paths),
         "details": string_field(brief, "details", 12000),
         "category": string_field(brief, "category", 80),
@@ -141,6 +157,7 @@ def canonical_order(oid, read=rest):
         "consent_verified": delivery.get("consent_verified") is True,
         "delivery_valid": delivery_valid,
         "delivery_result": row.get("delivery_result") if isinstance(row.get("delivery_result"), dict) else {},
+        "public_audio_consent": brief.get("public_audio_consent") is True,
         "payment_ref": row["payment_ref"], "paid_status": "paid_verified"}
 
 
@@ -150,7 +167,7 @@ def prepare(root):
         event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
         payload = event.get("client_payload", {})
         # Compatibility with nested dispatch does not trust the remaining payload.
-        raw = payload.get("order_id") or (payload.get("order") or {}).get("order_id")
+        raw = payload.get("order_id") or (payload.get("order") or {}).get("order_id") or (event.get("inputs") or {}).get("order_id")
         oid = order_id(raw)
         output("order_id", oid)
         output("valid_order", "true")
@@ -159,9 +176,15 @@ def prepare(root):
             mask(order.get(key))
         path = private_path()
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(order, handle)
+        try:
+            if hasattr(os, "fchmod"):
+                os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                fd = None
+                json.dump(order, handle)
+        finally:
+            if fd is not None:
+                os.close(fd)
         output("ready", "true")
         print("Canonical paid order and private photo manifest verified.")
         return 0
@@ -197,8 +220,25 @@ def audio_ready(root, oid):
         manifest = json.loads((root / "songs" / f"{oid}.json").read_text())
         if manifest.get("order_id") != oid or manifest.get("status") not in ("audio_ready", "delivered"):
             return False
-        return all((root / "songs" / name).is_file() and (root / "songs" / name).stat().st_size > 0
-                   for name in (f"{oid}.mp3", f"{oid}-full.mp3"))
+        for suffix, lower, upper in ((".mp3", 1, 60), ("-full.mp3", 180, 240)):
+            path = root / "songs" / (oid + suffix)
+            if not path.is_file() or path.stat().st_size == 0:
+                return False
+            checked = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration:stream=codec_type",
+                "-of", "json", str(path)], capture_output=True, text=True, timeout=25)
+            data = json.loads(checked.stdout)
+            if (checked.returncode or not any(s.get("codec_type") == "audio" for s in data.get("streams", []))
+                    or not lower <= float(data.get("format", {}).get("duration", 0)) <= upper):
+                return False
+            # VBR/Xing metadata can survive truncation; count actually decoded samples.
+            decoded = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-vn",
+                "-ac", "1", "-ar", "8000", "-f", "s16le", "-"], capture_output=True, timeout=35)
+            decoded_seconds = len(decoded.stdout) / 16000
+            if decoded.returncode or not lower <= decoded_seconds <= upper:
+                return False
+        return True
+    except subprocess.SubprocessError:
+        return False
     except (OSError, ValueError, TypeError):
         return False
 
@@ -210,6 +250,11 @@ def forge(root, run=subprocess.run):
         output("audio_ready", "true")
         print("Existing complete audio retained; generation not repeated.")
         return 0
+    if order.get("public_audio_consent") is not True:
+        record_blocked(root, oid, "private_audio_delivery_not_configured")
+        output("audio_ready", "false")
+        print("Generation held: private output delivery required, no public sharing authorization.")
+        return 1
     completed = run([sys.executable, "scripts/forge_order.py"], cwd=root,
         env=child_environment(order), capture_output=True, text=True)
     # Do not print provider bodies, raw customer captions or contacts from legacy scripts.
@@ -238,16 +283,22 @@ def persist_delivery(oid, result):
         headers={"Authorization": "Bearer " + key, "apikey": key,
                  "Content-Type": "application/json", "Prefer": "return=representation"})
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with store_open(request, timeout=30) as response:
             rows = json.loads(response.read(512 * 1024))
-        if len(rows) != 1 or rows[0].get("order_id") != oid:
+        if (len(rows) != 1 or rows[0].get("order_id") != oid or
+                rows[0].get("delivery_result") != result):
             raise ValueError("not persisted")
+        check = rest(ORDER_TABLE, {"order_id": "eq." + oid, "select": "order_id,delivery_result", "limit": "2"})
+        if len(check) != 1 or check[0].get("delivery_result") != result:
+            raise ValueError("readback mismatch")
     except Exception:
         raise GateError("private_delivery_receipt_not_persisted") from None
 
 
 def public_receipt(oid, result):
     status = result.get("delivery_status", "failed")
+    if status in ("sending", "unknown"):
+        status = "pending"
     if status not in ("pending", "submitted", "delivered", "failed"):
         status = "failed"
     safe = {"order_id": oid, "delivery_status": status}
@@ -260,61 +311,172 @@ def public_receipt(oid, result):
     return safe
 
 
-def deliver(root, run=subprocess.run, persist=persist_delivery):
+def private_delivery(oid):
+    rows = rest(ORDER_TABLE, {"order_id": "eq." + oid, "select": "order_id,delivery_result", "limit": "2"})
+    if len(rows) != 1 or rows[0].get("order_id") != oid or not isinstance(rows[0].get("delivery_result"), dict):
+        raise GateError("private_delivery_state_missing")
+    return rows[0]["delivery_result"]
+
+
+def reserve_notification(oid, attempt):
+    """Atomic empty-outbox -> sending. Never take over an ambiguous send."""
+    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+    if not key:
+        raise GateError("private_delivery_store_not_configured")
+    proposed = {"order_id": oid, "delivery_status": "sending", "attempt_id": attempt}
+    query = urllib.parse.urlencode({"order_id": "eq." + oid, "delivery_result": "eq.{}"})
+    request = urllib.request.Request(ORIGIN + "/rest/v1/" + ORDER_TABLE + "?" + query,
+        method="PATCH", data=json.dumps({"delivery_result": proposed}).encode(), headers={
+            "Authorization": "Bearer " + key, "apikey": key, "Content-Type": "application/json",
+            "Prefer": "return=representation"})
+    try:
+        with store_open(request, timeout=30) as response:
+            rows = json.loads(response.read(512 * 1024))
+        if len(rows) != 1 or rows[0].get("delivery_result") != proposed:
+            raise ValueError("not reserved")
+        if private_delivery(oid) != proposed:
+            raise ValueError("reservation readback")
+        return proposed
+    except Exception:
+        raise GateError("notification_reservation_unverified") from None
+
+
+def verify_served_audio(root, oid):
+    """Read back the exact customer full-audio destination before notifying."""
+    from notification_provider import NoRedirect
+    path = root / 'songs' / (oid + '-full.mp3')
+    size = path.stat().st_size
+    if not 1 <= size <= 50 * 1024 * 1024:
+        raise GateError('full_audio_size_invalid')
+    expected = hashlib.sha256(path.read_bytes()).hexdigest()
+    request = urllib.request.Request('https://raw.githubusercontent.com/LittleDoorClub/anthemsmith-site-live/main/songs/' + oid + '-full.mp3',
+        headers={'User-Agent': 'AnthemSmith/1.0', 'Cache-Control': 'no-cache'})
+    try:
+        with urllib.request.build_opener(NoRedirect()).open(request, timeout=45) as response:
+            digest, count = hashlib.sha256(), 0
+            while True:
+                chunk = response.read(128 * 1024)
+                if not chunk:
+                    break
+                count += len(chunk)
+                if count > size:
+                    raise ValueError('oversize')
+                digest.update(chunk)
+        if count != size or digest.hexdigest() != expected:
+            raise ValueError('audio mismatch')
+        return {'sha256': expected, 'bytes': size}
+    except Exception:
+        raise GateError('full_audio_not_yet_available_at_customer_url') from None
+
+
+def deliver(root, send=None, lookup=None, persist=None, read=None, reserve=None, verify=verify_served_audio):
+    from notification_provider import send as provider_send, lookup as provider_lookup, NotificationError
+    send, lookup = send or provider_send, lookup or provider_lookup
+    persist, read, reserve = persist or persist_delivery, read or private_delivery, reserve or reserve_notification
     order = read_private()
     oid = order["order_id"]
     if not audio_ready(root, oid):
         raise GateError("audio_not_ready_for_delivery")
-    persisted = order.get("delivery_result", {})
-    if persisted.get("delivery_status") in ("submitted", "delivered"):
-        write_json(root / "songs" / f"{oid}.delivery.json", public_receipt(oid, persisted))
-        print("Existing private provider receipt recovered; notification not repeated.")
+    path = root / "songs" / f"{oid}.delivery.json"
+    persisted = read(oid)  # Fresh private state, never a stale runner copy or public JSON.
+    state = persisted.get("delivery_status")
+    if state == "delivered":
+        write_json(path, public_receipt(oid, persisted))
         return 0
-    if not order.get("consent_verified") or not order.get("delivery_valid"):
-        write_json(root / "songs" / f"{oid}.delivery.json", {
-            "order_id": oid, "status": "delivery_pending", "delivery_status": "pending",
-            "reason": "consent_required" if not order.get("consent_verified") else "valid_recipient_required"})
-        print("Audio retained; notification awaiting verified authorization.")
+    if state == "submitted":
+        try:
+            updated = lookup(order, persisted)
+            persist(oid, updated)
+        except (NotificationError, GateError):
+            safe = public_receipt(oid, persisted)
+            safe["reason"] = "provider_status_check_pending"
+            write_json(path, safe)
+            return 1
+        write_json(path, public_receipt(oid, updated))
+        return 0 if updated.get("delivery_status") in ("submitted", "delivered") else 1
+    if state in ("sending", "unknown", "failed") or persisted:
+        # Unknown POST completion or failed receipt write is NOT permission to resend.
+        safe = public_receipt(oid, persisted)
+        safe["reason"] = "operator_notification_reconciliation_required"
+        write_json(path, safe)
         return 1
-    receipt = root / "songs" / f"{oid}.delivery.json"
+    if not order.get("consent_verified") or not order.get("delivery_valid"):
+        write_json(path, {"order_id": oid, "delivery_status": "pending",
+            "reason": "consent_required" if not order.get("consent_verified") else "valid_recipient_required"})
+        return 1
     try:
-        existing = json.loads(receipt.read_text())
+        public = json.loads(path.read_text())
     except (OSError, ValueError):
-        existing = {}
-    if existing.get("delivery_status") in ("submitted", "delivered"):
-        print("Notification already submitted; retry not duplicated.")
-        return 0
-    completed = run([sys.executable, "scripts/deliver_song.py"], cwd=root,
-        env=child_environment(order), capture_output=True, text=True)
+        public = {}
+    if (public.get("delivery_status") in ("submitted", "delivered") or
+            public.get("reason") == "private_receipt_reconciliation_required"):
+        # Keep this fence durable across every retry; never erase potential acceptance.
+        write_json(path, {"order_id": oid, "delivery_status": "pending",
+            "reason": "private_receipt_reconciliation_required"})
+        return 1
+    verify(root, oid)
+    attempt = str(uuid.uuid4())
+    reserve(oid, attempt)  # Durable compare-and-set before the first provider side effect.
     try:
-        result = json.loads(receipt.read_text())
-    except (OSError, ValueError):
-        result = {}
-    if not result:
-        result = {"order_id": oid, "delivery_status": "failed", "reason": "notification_failed_or_receipt_missing"}
-    private_saved = False
+        result = send(order, attempt)
+    except NotificationError as exc:
+        result = {"order_id": oid, "attempt_id": attempt,
+                  "delivery_status": "unknown" if exc.ambiguous else "failed", "reason": str(exc)}
     try:
         persist(oid, result)
-        private_saved = True
     except GateError:
-        pass
-    safe = public_receipt(oid, result)
-    if not private_saved:
-        safe["reason"] = "private_notification_receipt_pending"
-    write_json(receipt, safe)
-    if not private_saved or completed.returncode != 0 or result.get("delivery_status") not in ("submitted", "delivered"):
-        print("Notification or receipt persistence failed; generated audio remains available.")
+        write_json(path, {"order_id": oid, "delivery_status": "pending",
+                         "reason": "private_notification_receipt_pending"})
         return 1
-    print("Notification provider receipt recorded; submitted is not inbox delivery.")
-    return 0
+    write_json(path, public_receipt(oid, result))
+    return 0 if result.get("delivery_status") in ("submitted", "delivered") else 1
+
 
 
 def git(root, args, check=True):
     return subprocess.run(["git", *args], cwd=root, check=check, text=True, capture_output=True)
 
 
+def sanitize_public_artifacts(root, oid):
+    """Allowlist every public JSON even if a legacy child crashed mid-write."""
+    for suffix in ('.json', '.blocked.json', '.failed.json', '.delivery.json'):
+        path = root / 'songs' / (oid + suffix)
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding='utf-8'))
+        except (ValueError, OSError):
+            raise GateError('invalid_public_artifact') from None
+        if suffix == '.delivery.json':
+            safe = public_receipt(oid, data)
+            reason = data.get('reason', '')
+            if reason in ('consent_required', 'valid_recipient_required', 'provider_status_check_pending',
+                          'operator_notification_reconciliation_required', 'private_receipt_reconciliation_required',
+                          'private_notification_receipt_pending'):
+                safe['reason'] = reason
+        elif suffix == '.json':
+            safe = {'order_id': oid, 'status': 'audio_ready'}
+            if data.get('status') not in ('audio_ready', 'delivered'):
+                raise GateError('invalid_public_audio_status')
+            duration = data.get('duration_full')
+            if isinstance(duration, (int, float)) and 0 < duration <= 3600:
+                safe['duration_full'] = duration
+            if type(data.get('grounded_photo_lyrics')) is bool:
+                safe['grounded_photo_lyrics'] = data['grounded_photo_lyrics']
+            for key in ('sha256_full', 'sha256_preview'):
+                if re.fullmatch(r'[a-f0-9]{64}', str(data.get(key, ''))):
+                    safe[key] = data[key]
+        else:
+            reason = data.get('reason', '')
+            if not isinstance(reason, str) or not re.fullmatch(r'[a-z_]{1,100}', reason):
+                reason = 'order_processing_failed'
+            safe = {'order_id': oid, 'status': 'blocked' if suffix == '.blocked.json' else 'failed', 'reason': reason}
+        write_json(path, safe)
+
+
 def publish(root, oid):
     oid = order_id(oid)
+    sanitize_public_artifacts(root, oid)
     # A dependency/install failure can skip forge before its own failure handler runs.
     if (os.environ.get("ORDER_PREPARED") == "true" and
             os.environ.get("FORGE_OUTCOME") in ("skipped", "cancelled", "failure") and

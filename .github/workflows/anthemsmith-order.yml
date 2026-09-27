@@ -4,18 +4,23 @@ on:
   repository_dispatch:
     types: [anthemsmith-order]
   workflow_dispatch:
+    inputs:
+      order_id:
+        description: 'Existing verified private recovery order to process/reconcile; never accepts payment flags'
+        required: false
+        type: string
 
 permissions:
   contents: write
 
 # One active run per order; a retry never cancels an active forge.
 concurrency:
-  group: anthemsmith-order-${{ github.event.client_payload.order_id || github.event.client_payload.order.order_id || github.run_id }}
+  group: anthemsmith-order-${{ inputs.order_id || github.event.client_payload.order_id || github.event.client_payload.order.order_id || github.run_id }}
   cancel-in-progress: false
 
 jobs:
   relay-paused:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && !inputs.order_id
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -26,7 +31,7 @@ jobs:
           echo 'Only a verified private recovery record can authorize an order. Checkout stays paused.'
 
   forge:
-    if: github.event_name == 'repository_dispatch'
+    if: github.event_name == 'repository_dispatch' || (github.event_name == 'workflow_dispatch' && inputs.order_id)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
