@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex,nofollow,noarchive">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https://veqpmdsiqcjjpxgcubrp.supabase.co; img-src blob:; base-uri 'none'; form-action 'none'">
+<title>Complete your photo upload · AnthemSmith</title>
+<style>
+:root{color-scheme:light;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#25231f;background:#f4f2ec}*{box-sizing:border-box}body{margin:0;padding:24px 16px}main{max-width:640px;margin:8vh auto;background:#fff;padding:clamp(24px,5vw,48px);border:1px solid #dfdbd2;border-radius:14px;box-shadow:0 12px 40px #3425110b}.brand{font-weight:800;letter-spacing:-.03em;font-size:22px;margin:0 0 32px}h1{font-size:clamp(28px,6vw,38px);line-height:1.12;letter-spacing:-.04em;margin:0 0 16px}p{line-height:1.55}small,.muted{color:#646159}label{display:block;font-weight:650;margin:24px 0 10px}input{width:100%;padding:16px;border:2px dashed #ccc6bc;border-radius:8px;font:inherit}button{min-height:48px;border:0;border-radius:7px;background:#24221e;color:white;padding:12px 20px;font:inherit;font-weight:650;cursor:pointer;width:100%;margin-top:16px}button:disabled{opacity:.45;cursor:not-allowed}button.secondary{background:#eeeae2;color:#25231f}#message{padding:14px 16px;border-radius:8px;background:#f1eee7;white-space:pre-line}#message.error{background:#ffeded;color:#9c2323}ul{padding:0;list-style:none}li{display:flex;justify-content:space-between;gap:14px;border-bottom:1px solid #eee;padding:12px 0;font-size:14px}.badge{white-space:nowrap;color:#38674b}footer{border-top:1px solid #e5e1d8;margin-top:28px;padding-top:18px;font-size:13px;color:#6c6861}[hidden]{display:none!important}.privacy{font-size:13px}
+</style>
+</head>
+<body><main>
+<p class="brand">🎶 AnthemSmith 🎵🔨</p>
+<h1>Let's get your photos into your song.</h1>
+<p>Complete the upload for your existing order. No new payment is requested here.</p>
+<p id="message" role="status" aria-live="polite">Checking your secure link…</p>
+<section id="uploadSection" hidden>
+<label for="photos">Choose your photos</label>
+<input id="photos" type="file" accept="image/jpeg,image/png,image/webp" multiple>
+<p class="muted"><small>Up to 10 photos · JPG, PNG or WebP · 10 MB each, 50 MB total</small></p>
+<button id="upload" disabled>Upload selected photos</button>
+<ul id="files" aria-label="Uploaded photos"></ul>
+<button id="submit" class="secondary" disabled>Send photos to AnthemSmith</button>
+<p class="privacy">Your photos are stored privately for this order. Keep this secure link to yourself; it expires after 24 hours.</p>
+</section>
+<footer>This page confirms receipt of your photos. Your song and its delivery are confirmed separately.</footer>
+</main>
+<script>
+(()=>{'use strict';
+const API='https://veqpmdsiqcjjpxgcubrp.supabase.co/functions/v1/anthemsmith-recovery-upload';
+const params=new URLSearchParams(location.hash.slice(1));const order=params.get('order')||'',token=params.get('token')||'';
+const $=id=>document.getElementById(id);let state=null,busy=false;
+const errors={invalid_capability:'This secure link is not valid. Please use the complete link sent by AnthemSmith.',expired_capability:'This secure link has expired. Contact AnthemSmith for a fresh link. Your existing order remains unchanged.',upload_quota:'This order allows up to 10 photos and 50 MB total, including uploads still in progress.',invalid_file:'Please use a JPG, PNG or WebP image. The file contents must match its type.',file_too_large:'Each photo must be 10 MB or smaller.',pending_files:'One or more photos are still pending. Select those same photos again and retry the upload before sending.',no_ready_files:'Upload at least one photo before sending.',order_closed:'These photos have already been submitted.',upload_not_saved_retry:'The upload did not finish. Keep this page open and retry the same photos.',service_unavailable:'We could not finish that request. Please retry. Nothing is marked received until the upload succeeds.'};
+function message(text,error=false){$('message').textContent=text;$('message').classList.toggle('error',error);}
+async function call(action,opts={}){const headers={Authorization:'Bearer '+token,'X-Anthem-Order':order,...opts.headers};const r=await fetch(API+'/'+action,{...opts,headers,cache:'no-store',credentials:'omit',referrerPolicy:'no-referrer'});let d;try{d=await r.json();}catch{throw Error('service_unavailable');}if(!r.ok)throw Error(d.error||'service_unavailable');return d;}
+function controls(){const closed=state?.status==='source_received';$('photos').disabled=busy||closed;$('upload').disabled=busy||closed||!$('photos').files.length;$('submit').disabled=busy||closed||!state?.files?.some(f=>f.status==='ready')||state.files.some(f=>f.status==='pending');}
+function render(){const list=$('files');list.replaceChildren();for(let i=0;i<(state?.files||[]).length;i++){const f=state.files[i],li=document.createElement('li'),name=document.createElement('span'),badge=document.createElement('span');name.textContent='Photo '+(i+1)+' · '+(f.byte_size/1048576).toFixed(1)+' MB';badge.textContent=f.status==='ready'?'Saved privately':'Pending · retry this photo';badge.className='badge';li.append(name,badge);list.append(li);}controls();}
+async function refresh(){state=await call('status');render();if(state.status==='source_received'){$('uploadSection').hidden=true;message('Photos received. Thank you—we have the photos for your existing order.');}return state;}
+async function hash(file){return [...new Uint8Array(await crypto.subtle.digest('SHA-256',await file.arrayBuffer()))].map(x=>x.toString(16).padStart(2,'0')).join('');}
+$('photos').addEventListener('change',controls);
+$('upload').addEventListener('click',async()=>{if(busy)return;const files=[...$('photos').files];if(files.length>10){message('Choose up to 10 photos.',true);return;}if(files.some(f=>f.size>10485760||!f.size)){message('Each photo must be between 1 byte and 10 MB.',true);return;}busy=true;controls();try{await refresh();for(let i=0;i<files.length;i++){const file=files[i],digest=await hash(file),existing=state.files.find(f=>f.sha256===digest&&f.byte_size===file.size);if(existing?.status==='ready')continue;const id=existing?.id||crypto.randomUUID();message('Saving photo '+(i+1)+' of '+files.length+'…');await call('upload',{method:'POST',headers:{'Content-Type':file.type,'X-Upload-Id':id},body:file});await refresh();}$('photos').value='';message('Your photos are saved privately. When you have everything, select “Send photos to AnthemSmith.”');}catch(e){message(errors[e.message]||errors.service_unavailable,true);try{await refresh();}catch{}}finally{busy=false;controls();}});
+$('submit').addEventListener('click',async()=>{if(busy)return;busy=true;controls();try{await call('submit',{method:'POST'});await refresh();}catch(e){message(errors[e.message]||errors.service_unavailable,true);}finally{busy=false;controls();}});
+if(!/^AS-[A-Z0-9-]{6,64}$/.test(order)||!/^[A-Za-z0-9_-]{43}$/.test(token)){message(errors.invalid_capability,true);return;}
+refresh().then(()=>{if(state.status!=='source_received'){$('uploadSection').hidden=false;message(state.files.some(f=>f.status==='pending')?errors.pending_files:'Your secure upload is ready. Choose the photos for your song.');}}).catch(e=>message(errors[e.message]||errors.service_unavailable,true));
+})();
+</script>
+</body></html>

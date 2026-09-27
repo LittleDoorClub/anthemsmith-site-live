@@ -53,6 +53,7 @@ DETAILS = os.environ.get("DETAILS", "")
 MUAPI = os.environ["MUAPI_KEY"]
 REFERENCE_URL = (os.environ.get("REFERENCE_URL") or "").strip()
 PHOTO_URLS = (os.environ.get("PHOTO_URLS") or "").strip()
+INTAKE = (os.environ.get("INTAKE") or "").strip().lower()
 OPENAI_KEY = (os.environ.get("OPENAI_API_KEY") or "").strip()
 SUPABASE_SR_KEY = (os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
 SUPABASE_URL = "https://veqpmdsiqcjjpxgcubrp.supabase.co"
@@ -64,110 +65,26 @@ def die(msg):
     # would both fake a "Your song is ready" and permanently block the retry.
     # Failure records now live beside the delivered signal, mirroring the
     # AS-ANCHOR-GATE <OID>.blocked.json pattern (never the polled path).
-    json.dump({"order_id": OID, "status": "failed", "reason": msg},
-              open(f"{OUT}/{OID}.failed.json", "w"))
+    with open(f"{OUT}/{OID}.failed.json", "w") as failure_file:
+        json.dump({"order_id": OID, "status": "failed", "reason": msg}, failure_file)
     sys.exit(1)
 
-# ---------- 0. PHOTO INTAKE (download from ntfy, upload to Supabase, vision) ----------
-photo_descriptions = []
-photo_ocr_texts = []
-photo_storage_paths = []
+# ---------- 0. PHOTO INTAKE (durable private objects, then actual vision) ----------
+photo_descriptions, photo_ocr_texts, photo_storage_paths, photo_analysis = [], [], [], []
 vision_raw = None
-
+if INTAKE in ("photos", "screenshot") and not PHOTO_URLS:
+    die("photo_intake: source_files_missing")
 if PHOTO_URLS:
-    photo_url_list = [u.strip() for u in PHOTO_URLS.split(",") if u.strip()]
-    print(f"PHOTO INTAKE: {len(photo_url_list)} photo(s) from ntfy attachments", flush=True)
-    
-    for i, url in enumerate(photo_url_list):
-        # Download from ntfy
-        try:
-            photo_bytes = fetch(url, timeout=30)
-            print(f"  Photo {i+1}: downloaded {len(photo_bytes)} bytes", flush=True)
-        except Exception as e:
-            print(f"  Photo {i+1}: download failed: {e}", flush=True)
-            continue
-        
-        # Upload to Supabase Storage
-        storage_path = f"anthemsmith-orders/{OID}/photo_{i+1:02d}.jpg"
-        try:
-            storage_url = f"{SUPABASE_URL}/storage/v1/object/{storage_path}"
-            req = urllib.request.Request(storage_url, data=photo_bytes, method="POST")
-            req.add_header("Authorization", f"Bearer {SUPABASE_SR_KEY}")
-            req.add_header("Content-Type", "image/jpeg")
-            with urllib.request.urlopen(req, timeout=30) as r:
-                upload_result = json.loads(r.read())
-            photo_storage_paths.append(storage_path)
-            print(f"  Photo {i+1}: stored -> {storage_path}", flush=True)
-        except Exception as e:
-            print(f"  Photo {i+1}: storage failed: {e}", flush=True)
-            photo_storage_paths.append(None)
-        
-        # Vision analysis via OpenAI GPT-4o
-        if OPENAI_KEY and photo_bytes:
-            try:
-                import base64 as b64
-                img_b64 = b64.b64encode(photo_bytes).decode()
-                vision_prompt = (
-                    "Describe this photo in detail for a songwriter. What do you see? "
-                    "People, places, objects, actions, mood, lighting, colors. "
-                    "Include any visible text or signs you can read. "
-                    "Be specific and grounded — no invented facts. "
-                    "If you can't determine something, say so.\n\n"
-                    "Respond in JSON:\n"
-                    '{"description": "paragraph describing the scene", '
-                    '"people": "who appears to be there (age, expression, activity)", '
-                    '"setting": "where this is", '
-                    '"mood": "emotional tone", '
-                    '"colors": "dominant colors and lighting", '
-                    '"visible_text": "any text you can read in the image", '
-                    '"objects": "notable objects"}'
-                )
-                vision_req = urllib.request.Request(
-                    "https://api.openai.com/v1/chat/completions",
-                    data=json.dumps({
-                        "model": "gpt-4o",
-                        "messages": [{
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": vision_prompt},
-                                {"type": "image_url", "image_url": {
-                                    "url": f"data:image/jpeg;base64,{img_b64}",
-                                    "detail": "high"
-                                }}
-                            ]
-                        }],
-                        "max_tokens": 500,
-                        "temperature": 0.3
-                    }).encode(),
-                    method="POST"
-                )
-                vision_req.add_header("Authorization", f"Bearer {OPENAI_KEY}")
-                vision_req.add_header("Content-Type", "application/json")
-                with urllib.request.urlopen(vision_req, timeout=60) as r:
-                    vision_resp = json.loads(r.read())
-                content = vision_resp["choices"][0]["message"]["content"]
-                # Parse JSON from response
-                try:
-                    if "```json" in content:
-                        content = content.split("```json")[1].split("```")[0]
-                    elif "```" in content:
-                        content = content.split("```")[1].split("```")[0]
-                    parsed = json.loads(content)
-                except:
-                    parsed = {"description": content, "people": "", "setting": "", 
-                              "mood": "", "colors": "", "visible_text": "", "objects": ""}
-                
-                photo_descriptions.append(parsed.get("description", ""))
-                photo_ocr_texts.append(parsed.get("visible_text", ""))
-                if i == 0:
-                    vision_raw = parsed
-                print(f"  Photo {i+1}: vision done — {parsed.get('description','')[:80]}...", flush=True)
-            except Exception as e:
-                print(f"  Photo {i+1}: vision failed: {e}", flush=True)
-                photo_descriptions.append("")
-                photo_ocr_texts.append("")
-    
-    print(f"PHOTO INTAKE: {len(photo_descriptions)} analyzed, {len(photo_storage_paths)} stored", flush=True)
+    from photo_intake import PhotoIntakeError, intake_photos
+    try:
+        result = intake_photos(PHOTO_URLS.split(","), OID, SUPABASE_URL,
+                               SUPABASE_SR_KEY, OPENAI_KEY)
+    except PhotoIntakeError as error:
+        die("photo_intake: " + str(error))
+    photo_descriptions, photo_ocr_texts = result.descriptions, result.ocr_texts
+    photo_storage_paths, photo_analysis = result.storage_paths, result.analysis
+    vision_raw = [item["result"] for item in photo_analysis]
+    print(f"PHOTO INTAKE: {len(photo_analysis)} durable photos analyzed", flush=True)
 
 # ---------- 1. INGEST (public profile only) ----------
 def fetch(url, timeout=25):
@@ -272,7 +189,8 @@ sources = {"handle": handle, "bio": bio, "captions": captions, "alts": alt_texts
            "photo_descriptions": photo_descriptions,
            "photo_ocr": photo_ocr_texts,
            "photo_storage": [p for p in photo_storage_paths if p],
-           "vision_raw": vision_raw}
+           "vision_raw": vision_raw,
+           "photo_provenance": photo_analysis}
 
 # ---------- 2. VIBE READ (only what is visible; unknown stays null) ----------
 name = display_name or handle or ""
@@ -498,9 +416,9 @@ if photo_descriptions:
     if DETAILS:
         anchor, anchor_src = DETAILS.strip(), "brief"
     elif photo_descriptions:
-        # Use the first line of the vision description as a fallback anchor
-        anchor = photo_descriptions[0].split(".")[0].strip()[:120] if photo_descriptions[0] else None
-        anchor_src = "vision" if anchor else None
+        # A grounded visual observation is not a verbatim customer quotation.
+        anchor = photo_analysis[0]["result"]["observations"][0].strip()
+        anchor_src = "photo-observation"
     else:
         anchor, anchor_src = None, None
 elif ig_ingest is not None:
@@ -546,17 +464,32 @@ if not anchor:
     print("BLOCKED", OID, "-", reason, flush=True)
     sys.exit(2)
 
-banned = r"\b(forever|always|journey|unbreakable|shine bright|dreams come true|heart of gold)\b"
-def clean(s): return re.sub(banned, "real", s, flags=re.I)
+# Photo orders require source-grounded composition and a separate line review.
+# Both full lyrics and their provenance stay in private order records.
+song_title = f"AnthemSmith {OID}"
+grounded_photo_lyrics = False
+if photo_analysis:
+    from grounded_lyrics import GroundedLyricsError, compose_photo_lyrics
+    from photo_intake import PhotoIntakeError, persist_composition
+    try:
+        song = compose_photo_lyrics(photo_analysis, DETAILS, CATEGORY, MOOD, VOICE, OPENAI_KEY)
+        persist_composition(OID, photo_analysis, song, SUPABASE_URL, SUPABASE_SR_KEY)
+    except (GroundedLyricsError, PhotoIntakeError) as error:
+        die("photo_lyrics: " + str(error))
+    lyrics, song_title = song.lyrics, song.title
+    grounded_photo_lyrics = True
+else:
+    banned = r"\b(forever|always|journey|unbreakable|shine bright|dreams come true|heart of gold)\b"
+    def clean(s): return re.sub(banned, "real", s, flags=re.I)
 
-v1 = clean(f"They say {name} keeps it real, ask the regulars how it feels," if name else "Some folks just carry the room, from the first hello to the last song,")
-v2 = clean(corpus[:160]) if corpus else "Every detail says the same thing, the real ones know it's true,"
-pre = "And when the moment came, they didn't even flinch,"
-chorus = clean(f"{anchor} — that's the whole story, that's the anthem right here," if anchor
-               else "Say it plain, say it loud, this one's yours and it's true,")
-chorus2 = clean(f"Put it on the speaker, let the whole block hear, {name}, this one's yours,")
+    v1 = clean(f"They say {name} keeps it real, ask the regulars how it feels," if name else "Some folks just carry the room, from the first hello to the last song,")
+    v2 = clean(corpus[:160]) if corpus else "Every detail says the same thing, the real ones know it's true,"
+    pre = "And when the moment came, they didn't even flinch,"
+    chorus = clean(f"{anchor} — that's the whole story, that's the anthem right here," if anchor
+                   else "Say it plain, say it loud, this one's yours and it's true,")
+    chorus2 = clean(f"Put it on the speaker, let the whole block hear, {name}, this one's yours,")
 
-lyrics = f"""[Verse 1]
+    lyrics = f"""[Verse 1]
 {v1}
 {v2}
 
@@ -603,7 +536,7 @@ def poll(rid, max_s=840):
 
 gender = "male" if VOICE.lower().startswith("m") else ("female" if VOICE.lower().startswith("f") else "male")
 model_used = "V6"
-sub = post({"prompt": lyrics, "style": style, "title": f"AnthemSmith {OID}", "custom_mode": True,
+sub = post({"prompt": lyrics, "style": style, "title": song_title, "custom_mode": True,
             "instrumental": False, "vocal_gender": gender, "model": "V6", "duration": 205,
             "negative_tags": "sad, ballad, piano lead, cheesy, autotune"})
 rid = sub.get("request_id") or sub.get("requestId") or (sub.get("data") or {}).get("request_id")
@@ -613,7 +546,7 @@ outs = d.get("outputs") or []
 if not outs:
     # V6 422-style fallback: one V4_5 shot
     model_used = "V4_5"
-    sub = post({"prompt": lyrics, "style": style, "title": f"AnthemSmith {OID}", "custom_mode": True,
+    sub = post({"prompt": lyrics, "style": style, "title": song_title, "custom_mode": True,
                 "instrumental": False, "vocal_gender": gender, "model": "V4_5",
                 "negative_tags": "sad, ballad, piano lead, cheesy, autotune"})
     rid = sub.get("request_id") or (sub.get("data") or {}).get("request_id")
@@ -634,6 +567,8 @@ a1 = fetch(u, timeout=120); open(f"{OUT}/{OID}-t1.mp3", "wb").write(a1)
 a2 = fetch(u, timeout=120); open(f"{OUT}/{OID}-t1v.mp3", "wb").write(a2)
 assert hashlib.sha256(a1).hexdigest() == hashlib.sha256(a2).hexdigest(), "byte-stability failed"
 dur = probe_dur(f"{OUT}/{OID}-t1.mp3")
+if photo_analysis and not 180 <= dur <= 240:
+    die("photo_audio_duration_out_of_range")
 # 30s hook: densest-vocal window approximation at 3/4 mark (chorus zone), ffprobe-verified
 start = max(0, int(dur * 0.72) - 15)
 subprocess.run(["ffmpeg", "-y", "-ss", str(start), "-t", "30", "-i", f"{OUT}/{OID}-t1.mp3",
@@ -643,8 +578,9 @@ os.remove(f"{OUT}/{OID}-t1v.mp3")
 
 meta = {"order_id": OID, "status": "audio_ready", "handle": handle, "category": CATEGORY,
         "display_name": display_name or None,
+        "title": song_title, "grounded_photo_lyrics": grounded_photo_lyrics,
         "duration_full": dur, "model": model_used,
-        "heart_anchor": anchor, "heart_anchor_source": anchor_src,
+        "heart_anchor": None if photo_analysis else anchor, "heart_anchor_source": anchor_src,
         "reference": {"url": REFERENCE_URL or None, 
                       "resolved": reference_resolved,
                       "title": reference_title, 
@@ -652,8 +588,11 @@ meta = {"order_id": OID, "status": "audio_ready", "handle": handle, "category": 
         "sources": {"bio": bool(bio), "captions_used": len(captions),
                     "alts_seen": len(alt_texts), "alt_lines_used": len(alt_lines),
                     "details": bool(DETAILS), "anchor_source": anchor_src,
+                    "photos_analyzed": len(photo_analysis),
+                    "photo_analysis_complete": bool(photo_analysis),
+                    "photo_observation_is_customer_quote": False if photo_analysis else None,
                     "render_status": render_status,
                     "render_chrome": render_chrome},
         "ingest_note": ingest_note}
 json.dump(meta, open(f"{OUT}/{OID}.json", "w"), indent=1)
-print("DELIVERED", OID, dur, "anchor=", (anchor or "(none)")[:60], "src=", anchor_src)
+print("AUDIO_READY", OID, dur, "src=", anchor_src)

@@ -1,221 +1,95 @@
 name: anthemsmith-order
+
 on:
   repository_dispatch:
     types: [anthemsmith-order]
-  schedule:
-    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 permissions:
   contents: write
-  actions: write
+
+# One active run per order; a retry never cancels an active forge.
+concurrency:
+  group: anthemsmith-order-${{ github.event.client_payload.order_id || github.event.client_payload.order.order_id || github.run_id }}
+  cancel-in-progress: false
 
 jobs:
-  relay-poll:
-    # Pulls paid-order JSONs from the public ntfy relay and fires the
-    # authenticated repository_dispatch server-side. Claim-file lock in the
-    # repo prevents double-dispatch across pollers (409 race = lock held).
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+  relay-paused:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    permissions:
+      contents: read
     steps:
-      - name: Relay poll → claim → repository_dispatch
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO_URL: https://api.github.com/repos/LittleDoorClub/anthemsmith-site-live
-          RAW_URL: https://raw.githubusercontent.com/LittleDoorClub/anthemsmith-site-live/main
+      - name: Public relay remains disabled
         run: |
-          python3 - <<'PY'
-          import json, os, time, urllib.request
-          REPO = "LittleDoorClub/anthemsmith-site-live"
-          TOK = os.environ["GH_TOKEN"]
-          GH = os.environ["GH_REPO_URL"].rstrip("/")
-          RAW = os.environ["RAW_URL"].rstrip("/")
-          H = {"Accept": "application/vnd.github+json",
-               "Authorization": "Bearer " + TOK,
-               "Content-Type": "application/json"}
-
-          def gh_json(method, url, body=None):
-              data = json.dumps(body).encode() if body is not None else None
-              req = urllib.request.Request(url, data=data, method=method, headers=H)
-              try:
-                  with urllib.request.urlopen(req, timeout=30) as r:
-                      return r.status, json.loads(r.read().decode() or "{}")
-              except urllib.error.HTTPError as e:
-                  return e.code, json.loads(e.read().decode() or "{}")
-
-          def file_sha(path):
-              st, d = gh_json("GET", f"{GH}/contents/{path}")
-              return (d.get("sha") if st == 200 else None)
-
-          def claim_order(oid, force=False):
-              """Returns True if we own the order (claim written). 409-style race
-              is resolved by the sha precondition: only one writer wins.
-              When force=True (e.g. paid message for an in-flight claim):
-              update timestamp and redispatch — forge gate filters status."""
-              delivered = file_sha(f"songs/{oid}.json")
-              if delivered:
-                  print("skip delivered", oid); return False
-              csha = file_sha(f"songs/{oid}.claim.json")
-              if csha:
-                  st, d = gh_json("GET", f"{GH}/contents/songs/{oid}.claim.json")
-                  if st == 200:
-                      import base64
-                      ts = json.loads(base64.b64decode(d["content"]).decode()).get("ts", 0)
-                      age_s = time.time() - float(ts)
-                      if not force and age_s < 25 * 60:
-                          print("skip in-flight", oid); return False
-                      if force and age_s < 25 * 60:
-                          print("paid re-claim", oid)
-                      print("stale claim, retaking", oid)
-              body = {"message": f"claim {oid}", "content":
-                      __import__("base64").b64encode(json.dumps(
-                          {"ts": time.time(), "by": "relay-poll"}).encode()).decode()}
-              body = body | ({"sha": csha} if csha else {})
-              st, d = gh_json("PUT", f"{GH}/contents/songs/{oid}.claim.json", body)
-              if st in (200, 201):
-                  return True
-              print("claim race lost", oid, st); return False
-
-          # Accepted paid statuses — same set as forge payment gate.
-          # Priority order: a verified payment marker (from a server-side
-          # Stripe event) beats a browser-claimed marker. This ordering
-          # prevents the bug where an "awaiting_payment" message arrives
-          # in the same ntfy poll batch as a later "paid" message and the
-          # paid message is silently skipped by oid deduplication.
-          PAID_ACCEPTED = {"paid_claimed", "paid_stripe_return", "paid_verified", "paid"}
-          PAID_PRIORITY = {"paid": 5, "paid_verified": 4, "paid_stripe_return": 3,
-                           "paid_claimed": 2, "awaiting_payment": 1}
-          def paid_rank(ps):
-              return PAID_PRIORITY.get(str(ps).strip().lower(), 0)
-
-          seen = set()
-          for _ in range(3):
-              try:
-                  with urllib.request.urlopen(
-                      "https://ntfy.sh/as-anthemsmith-orders-v1/json?poll=1&since=12h",
-                      timeout=30) as r:
-                      # -- COLLECT phase: gather all valid messages, group by oid --
-                      batch = {}  # oid -> best message + best paid_rank
-                      for ln in r.read().decode().splitlines():
-                          try:
-                              e = json.loads(ln)
-                          except Exception:
-                              continue
-                          if e.get("event") != "message":
-                              continue
-                          try:
-                              o = json.loads(e.get("message", "{}"))
-                          except Exception:
-                              continue
-                          oid = o.get("order_id")
-                          if not oid or oid in seen:
-                              continue
-                          if not all(k in o for k in ("order_id", "email")):
-                              print("skip malformed", oid); continue
-                          ig = str(o.get("ig_url", "")).strip()
-                          intake = str(o.get("intake", "link"))
-                          photo_urls = o.get("photo_urls", [])
-                          if intake == "link" and not ig.startswith("https://www.instagram.com/"):
-                              print("skip bad ig_url", oid); continue
-                          if intake != "link" and not photo_urls and not ig:
-                              print("skip no source", oid); continue
-                          # Keep the highest-priority paid_status message for each oid
-                          rank = paid_rank(o.get("paid_status", ""))
-                          existing = batch.get(oid)
-                          if existing is None or rank > existing[0]:
-                              batch[oid] = (rank, o)
-
-                      # -- DISPATCH phase: process best message per oid --
-                      for oid, (rank, o) in sorted(batch.items()):
-                          if len(seen) >= 5:
-                              break
-                          seen.add(oid)
-                          paid_status = str(o.get("paid_status", "")).strip().lower()
-                          if claim_order(oid, force=(paid_status in PAID_ACCEPTED)):
-                              dispatch_o = {k: v for k, v in o.items() if k != "intake"}
-                              # KEYCAP #48 (09-24): client_payload caps at 10 TOP-LEVEL keys; nest the order.
-                              payload = {"event_type": "anthemsmith-order", "client_payload": {"order": dispatch_o}}
-                              st, d = gh_json("POST", f"{GH}/dispatches", payload)
-                              print("dispatched", oid, st, "keys=%d paid=%s rank=%d" % (len(dispatch_o), paid_status, rank))
-                          if len(seen) >= 5:
-                              break
-              except Exception as ex:
-                  print("poll err", ex)
-              time.sleep(15)
-          PY
+          echo 'Public ntfy payment claims are not trusted. Polling and automatic dispatch remain disabled.'
+          echo 'Only a verified private recovery record can authorize an order. Checkout stays paused.'
 
   forge:
     if: github.event_name == 'repository_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
-      - name: Install audio tools
+      - name: Verify canonical private order, payment, source and contact
+        id: prepare
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python scripts/order_workflow.py prepare
+
+      - name: Install audio and image tools
+        if: steps.prepare.outputs.ready == 'true'
         run: |
-          pip install librosa numpy --quiet
-          pip install instaloader --quiet
+          python -m pip install librosa numpy instaloader Pillow --quiet
           sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
 
-      - name: "Forge song: scrape, measure, lyrics, Suno, QC"
+      - name: Forge from durable private photos
+        id: forge
+        if: steps.prepare.outputs.ready == 'true'
         env:
           MUAPI_KEY: ${{ secrets.MUAPI_KEY }}
-          ORDER_ID: ${{ github.event.client_payload.order.order_id }}
-          IG_URL: ${{ github.event.client_payload.order.ig_url }}
-          CATEGORY: ${{ github.event.client_payload.order.category }}
-          MOOD: ${{ github.event.client_payload.order.mood }}
-          VOICE: ${{ github.event.client_payload.order.voice }}
-          DETAILS: ${{ github.event.client_payload.order.details }}
-          DELIVERY: ${{ github.event.client_payload.order.delivery || '' }}
-          SMS_TO: ${{ github.event.client_payload.order.sms_to }}
-          EMAIL: ${{ github.event.client_payload.order.email }}
-          PAID_STATUS: ${{ github.event.client_payload.order.paid_status }}
-          REFERENCE_URL: ${{ github.event.client_payload.order.reference_url || '' }}
-          PHOTO_URLS: ${{ join(github.event.client_payload.order.photo_urls || '', ',') }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: python scripts/forge_order.py
+        run: python scripts/order_workflow.py forge
 
-      - name: Commit the delivered song and delivery status
-        run: |
-          git config user.name "anthemsmith-forge"
-          git config user.email "forge@anthemsmith.com"
-          git add songs/
-          git rm --cached --ignore-unmatch \
-            "songs/${{ github.event.client_payload.order.order_id }}.claim.json" \
-            "songs/${{ github.event.client_payload.order.order_id }}.failed.json" \
-            "songs/${{ github.event.client_payload.order.order_id }}.blocked.json" 2>/dev/null || true
-          rm -f "songs/${{ github.event.client_payload.order.order_id }}.claim.json" \
-                "songs/${{ github.event.client_payload.order.order_id }}.failed.json" \
-                "songs/${{ github.event.client_payload.order.order_id }}.blocked.json"
-          git add songs/
-          git commit -m "song ${{ github.event.client_payload.order.order_id }}" || echo "nothing to commit"
-          git push
+      - name: Publish audio or blocked/failed status even when forge fails
+        id: publish_audio
+        if: always() && steps.prepare.outputs.valid_order == 'true'
+        env:
+          ORDER_ID: ${{ steps.prepare.outputs.order_id }}
+          ORDER_PREPARED: ${{ steps.prepare.outputs.ready }}
+          FORGE_OUTCOME: ${{ steps.forge.outcome }}
+        run: python scripts/order_workflow.py publish
 
-      - name: Deliver the song link (SMS / Email)
-        if: success()
+      - name: Deliver only after audio has been published
+        id: delivery
+        if: always() && !cancelled() && steps.prepare.outputs.ready == 'true' && steps.forge.outputs.audio_ready == 'true' && steps.publish_audio.outcome == 'success'
         env:
           TWILIO_SID: ${{ secrets.TWILIO_SID }}
           TWILIO_TOKEN: ${{ secrets.TWILIO_TOKEN }}
           TWILIO_FROM: ${{ secrets.TWILIO_FROM }}
           GABE_CC: ${{ secrets.GABE_CC }}
           RESEND_KEY: ${{ secrets.RESEND_KEY }}
-          ORDER_ID: ${{ github.event.client_payload.order.order_id }}
-          DELIVERY: ${{ github.event.client_payload.order.delivery }}
-          SMS_TO: ${{ github.event.client_payload.order.sms_to }}
-          EMAIL: ${{ github.event.client_payload.order.email }}
-        run: python scripts/deliver_song.py
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python scripts/order_workflow.py deliver
 
-      - name: Commit delivery status
-        if: success()
-        run: |
-          git config user.name "anthemsmith-forge"
-          git config user.email "forge@anthemsmith.com"
-          git add songs/${{ github.event.client_payload.order.order_id }}.delivery.json 2>/dev/null || true
-          git commit -m "delivery ${{ github.event.client_payload.order.order_id }}" || echo "nothing to commit"
-          git push || echo "push skipped"
+      - name: Publish notification outcome even when notification fails
+        id: publish_delivery
+        if: always() && steps.prepare.outputs.valid_order == 'true'
+        env:
+          ORDER_ID: ${{ steps.prepare.outputs.order_id }}
+          ORDER_PREPARED: ${{ steps.prepare.outputs.ready }}
+          FORGE_OUTCOME: ${{ steps.forge.outcome }}
+        run: python scripts/order_workflow.py publish
+
+      - name: Remove runner-only private order payload
+        if: always()
+        run: python scripts/order_workflow.py cleanup

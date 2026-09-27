@@ -111,7 +111,7 @@ for(const kind of ['screenshot','photos']){
   const selected=Array.from(input.files);let error='';
   if(selected.length>c.limit)error='Choose at most '+c.limit+' '+(kind==='photos'?'photos.':'screenshot'+(c.limit>1?'s':'')+'.');
   else if(selected.some(f=>!['image/jpeg','image/png','image/webp'].includes(f.type)))error='Use JPG, PNG or WebP images.';
-  else if(selected.some(f=>f.size===0||f.size>15*1024*1024))error='Each image must contain data and be no larger than 15 MB.';
+  else if(selected.some(f=>f.size===0||f.size>10*1024*1024))error='Each image must contain data and be no larger than 10 MB.';
   else if(selected.reduce((total,f)=>total+f.size,0)>50*1024*1024)error='Keep the selected images under 50 MB in total.';
   if(error){input.value='';input.setCustomValidity(error);document.getElementById(c.status).textContent=error;return}
   input.setCustomValidity('');if(selected.length)intakeFiles[kind]=selected;showFiles(kind);
@@ -131,7 +131,8 @@ const GH_OWNER='LittleDoorClub',GH_REPO='anthemsmith-site-live';
 function orderStatusURL(id){return 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'.json'}
 function blockedStatusURL(id){return 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'.blocked.json'}
 function failedStatusURL(id){return 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'.failed.json'}
-function songURL(id){return 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'.mp3'}
+function songURL(id){return 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'-full.mp3'}
+function recoveryStatusURL(id){return 'https://raw.githubusercontent.com/'+GH_OWNER+'/'+GH_REPO+'/main/songs/'+id+'.recovery.json'}
 async function fireOrder(data){
  throw new Error('New orders are temporarily paused. Existing customers: do not pay again.');
 }
@@ -142,10 +143,11 @@ function watchOrder(id,box,tries){
  const timer=setInterval(async()=>{
   n++;
   try{
-   const [r,rb,rf]=await Promise.all([
+   const [r,rb,rf,rr]=await Promise.all([
     fetch(orderStatusURL(id)+'?t='+Date.now()).catch(()=>null),
     fetch(blockedStatusURL(id)+'?t='+Date.now()).catch(()=>null),
-    fetch(failedStatusURL(id)+'?t='+Date.now()).catch(()=>null)
+    fetch(failedStatusURL(id)+'?t='+Date.now()).catch(()=>null),
+    fetch(recoveryStatusURL(id)+'?t='+Date.now()).catch(()=>null)
    ]);
    const manifest=r&&r.ok?await r.json().catch(()=>null):null;
    // An old failure marker must not hide audio that is already ready.
@@ -155,7 +157,7 @@ function watchOrder(id,box,tries){
     box.innerHTML='<h3>Your song is ready.</h3><p>Your song is available here. You can play or download it below.</p><audio controls src="'+full+'"></audio><p><a href="'+full+'" download>Download the full song</a></p>';
     return;
    }
-   if((rb&&rb.ok)||(rf&&rf.ok)){
+   if((rb&&rb.ok)||(rf&&rf.ok)||(rr&&rr.ok)){
     clearInterval(timer);
     box.innerHTML='<h3>We need to recover your order.</h3><p>We could not finish order '+id+'. Please contact <a href="https://www.instagram.com/anthemsmith/" target="_blank" rel="noopener">@AnthemSmith</a> or email <a href="mailto:'+AS_EMAIL+'">'+AS_EMAIL+'</a> with this order ID. <strong>Do not pay again.</strong></p>';
     return;
@@ -170,41 +172,9 @@ function watchOrder(id,box,tries){
  },4000);
 }
 function payChoicePanel(values){showOrderingPaused();}
-async function uploadPhotosToNtfy(files){
- const urls=[];
- for(const file of files){
-  const resp=await fetch('https://ntfy.sh/as-anthemsmith-photos',{method:'PUT',headers:{'Title':'AS-PHOTO','Filename':file.name,'Tags':'camera'},body:file});
-  if(!resp.ok)throw new Error('Upload failed: '+resp.status);
-  const j=await resp.json();
-  urls.push(j.attachment.url);
- }
- return urls;
-}
-async function submitInstant(){
- if(AS_ORDERING_PAUSED){showOrderingPaused();return}
- const files=selectedIntakeFiles();
- if(files.length>0){
-  const box=$('#brief');box.hidden=false;
-  box.innerHTML='<p class="small">Uploading '+files.length+' photo(s)...</p>';
-  let photoUrls=[];
-  try{photoUrls=await uploadPhotosToNtfy(files)}catch(e){
-   box.innerHTML='<p class="small">Photo upload failed: '+e.message+'</p>';return
-  }
-  box.innerHTML='<p class="small">Photos uploaded — preparing order...</p>';
-  const values=requestData();
-  values.photo_urls=photoUrls;values.intake=activeLane();
-  values.file_count=String(files.length);
-  sessionStorage.setItem('anthemsmith_order',JSON.stringify(values));
-  payChoicePanel(values);
-  return;
- }
- // No photos — IG link flow
- const values=Object.fromEntries(Array.from(new FormData($('#songForm'))).filter(([,v])=>typeof v==='string'));
- const hasLink=!!values.instagram1;
- if(!hasLink){$('#brief').hidden=false;$('#brief').innerHTML='<p class="small">Give us a way in — an Instagram link, a grid screenshot, or up to 10 photos. Any one works.</p>';return}
- values.intake='link';
- payChoicePanel(values);
-}
+// Public relay photo uploads are removed. Recovery uses order-bound private storage.
+// New checkout must be wired to a verified server-owned order before reopening.
+async function submitInstant(){showOrderingPaused();}
 function resumeAfterPayment(){
  // Viewing an existing order is read-only. A return URL does not prove payment.
  let data={};
