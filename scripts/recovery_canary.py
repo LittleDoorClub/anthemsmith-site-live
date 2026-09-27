@@ -113,8 +113,17 @@ def analyze(oid):
                 trace.append({'stage': stage, 'method': req.method, 'http': response.status, 'response_bytes': len(data)})
                 return data, dict(response.headers)
         except urllib.error.HTTPError as exc:
-            trace.append({'stage': stage, 'method': req.method, 'http': exc.code})
-            # Only a code, never provider body, key, raw path, or request data.
+            safe = {'stage': stage, 'method': req.method, 'http': exc.code}
+            try:
+                detail = json.loads(exc.read(16384)).get('error', {})
+                for field in ('code', 'type'):
+                    value = detail.get(field)
+                    if isinstance(value, str) and re.fullmatch(r'[a-z_0-9]{1,80}', value):
+                        safe['provider_' + field] = value
+            except Exception:
+                pass
+            trace.append(safe)
+            # Only error category, never provider body, key, path, or request data.
             raise PhotoIntakeError(stage + '_http_' + str(exc.code)) from None
         finally:
             Path('canary-network-evidence.json').write_text(json.dumps(trace), encoding='utf-8')
