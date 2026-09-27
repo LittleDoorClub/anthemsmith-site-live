@@ -99,9 +99,27 @@ def analyze(oid):
     row, uploads = inspect(oid)
     if row['status'] != 'source_received' or not uploads or any(r['status'] != 'ready' for r in uploads):
         raise CanaryError('canary_sources_not_ready')
-    from photo_intake import inspect_private_sources
+    from photo_intake import inspect_private_sources, PhotoIntakeError, _NoRedirect
+    trace = []
+    def observed_http(req, timeout, limit):
+        host = urllib.parse.urlsplit(req.full_url).hostname
+        stage = 'vision' if host == 'api.openai.com' else 'storage' if '/storage/v1/' in req.full_url else 'ledger'
+        req.add_header('User-Agent', 'AnthemSmith/1.0')
+        try:
+            with urllib.request.build_opener(_NoRedirect()).open(req, timeout=timeout) as response:
+                data = response.read(limit + 1)
+                if len(data) > limit:
+                    raise PhotoIntakeError('response_too_large')
+                trace.append({'stage': stage, 'method': req.method, 'http': response.status, 'response_bytes': len(data)})
+                return data, dict(response.headers)
+        except urllib.error.HTTPError as exc:
+            trace.append({'stage': stage, 'method': req.method, 'http': exc.code})
+            # Only a code, never provider body, key, raw path, or request data.
+            raise PhotoIntakeError(stage + '_http_' + str(exc.code)) from None
+        finally:
+            Path('canary-network-evidence.json').write_text(json.dumps(trace), encoding='utf-8')
     result = inspect_private_sources([r['object_path'] for r in uploads], oid, ORIGIN,
-                           os.environ['SUPABASE_SERVICE_ROLE_KEY'], os.environ['OPENAI_API_KEY'])
+                           os.environ['SUPABASE_SERVICE_ROLE_KEY'], os.environ['OPENAI_API_KEY'], http=observed_http)
     persisted = request('anthemsmith_recovery_analyses', {'order_id': 'eq.' + oid,
         'select': 'id,order_id,object_path,source_sha256,model,provider_request_id,analysis'})
     if len(persisted) != len(uploads):
@@ -165,6 +183,9 @@ if __name__ == '__main__':
         sys.exit(main())
     except Exception as exc:
         # Do not print API error bodies, keys, request headers or customer rows.
-        reason = str(exc) if isinstance(exc, CanaryError) else type(exc).__name__
+        safe_code = str(exc)
+        reason = (safe_code if type(exc).__name__ in ('CanaryError', 'PhotoIntakeError')
+                  and re.fullmatch(r'[a-z_0-9]{1,100}', safe_code) else type(exc).__name__)
+        Path('canary-evidence.json').write_text(json.dumps({'stage': 'failed', 'reason': reason}), encoding='utf-8')
         print('CANARY_FAILED:', reason)
         sys.exit(1)

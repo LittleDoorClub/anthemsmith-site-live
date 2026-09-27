@@ -43,6 +43,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: recovery-canary-${{ inputs.order_id }}-${{ inputs.action }}
-          path: canary-evidence.json
+          path: |
+            canary-evidence.json
+            canary-network-evidence.json
           if-no-files-found: ignore
           retention-days: 7

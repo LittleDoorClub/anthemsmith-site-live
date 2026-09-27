@@ -85,7 +85,8 @@ class ScopeTests(unittest.TestCase):
              patch.object(photo_intake, 'inspect_private_sources', return_value=SimpleNamespace(analysis=[analysis])) as intake, \
              patch.dict(os.environ, {'SUPABASE_SERVICE_ROLE_KEY': 'fixture-key', 'OPENAI_API_KEY': 'fixture-vision'}):
             result = c.analyze(OID)
-        intake.assert_called_once_with([upload['object_path']], OID, c.ORIGIN, 'fixture-key', 'fixture-vision')
+        self.assertEqual(intake.call_args.args, ([upload['object_path']], OID, c.ORIGIN, 'fixture-key', 'fixture-vision'))
+        self.assertTrue(callable(intake.call_args.kwargs['http']))
         self.assertEqual(result['stored_images_examined'], 1)
         self.assertTrue(result['readback'])
         self.assertFalse(result['music_generated'])
