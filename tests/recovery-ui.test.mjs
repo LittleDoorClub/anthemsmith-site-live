@@ -14,7 +14,7 @@ async function page(error=null){
  const element=()=>({hidden:true,disabled:true,files:[],value:'',textContent:'',classList:{toggle(){}},handlers:{},addEventListener(k,fn){this.handlers[k]=fn;},replaceChildren(){},append(){}});
  const $=id=>elements[id]||=(element());
  const saved={id:uuid,status:'ready',sha256:digest,byte_size:bytes.length,mime_type:'image/png'};
- const sandbox={document:{getElementById:$,createElement:element},location:{hash:'#order='+oid+'&token='+token},URLSearchParams,crypto:webcrypto,fetch:async(url,opts)=>{
+ const sandbox={document:{getElementById:$,createElement:element},location:{hash:'#order='+oid+'&token='+token},URLSearchParams,crypto:webcrypto,AbortSignal,fetch:async(url,opts)=>{
   const action=url.split('/').at(-1);calls.push({action,opts,url});
   assert.ok(!url.includes(token));assert.equal(opts.headers.Authorization,'Bearer '+token);assert.equal(opts.headers['X-Anthem-Order'],oid);assert.equal(opts.credentials,'omit');
   if(action==='status')return new Response(JSON.stringify({order_id:oid,status:'awaiting_sources',files:[saved]}));

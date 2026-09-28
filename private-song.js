@@ -172,7 +172,8 @@ export async function initialize({ document, location, history, urlAPI = URL, fe
   retry?.addEventListener('click', load);
   try {
     try { capability = parseCapability(location.hash); }
-    finally { history.replaceState(null, '', location.pathname); }
+    // Erase always (even for an invalid fragment); a throwing history must never mislabel it.
+    finally { try { history.replaceState(null, '', location.pathname); } catch {} }
   } catch {
     clearMedia();
     status.textContent = ERROR_TEXT.invalid_capability;
