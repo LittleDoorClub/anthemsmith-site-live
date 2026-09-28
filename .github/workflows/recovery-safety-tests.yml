@@ -3,6 +3,9 @@ on:
   push:
     paths:
       - app.js
+      - recovery.html
+      - private-song.html
+      - private-song.js
       - scripts/order_workflow.py
       - scripts/notification_provider.py
       - scripts/photo_intake.py
@@ -33,4 +36,4 @@ jobs:
       - name: Existing-song browser-boundary regressions (offline fixtures)
         run: |
           node --check app.js
-          node --test tests/player-failure.test.mjs tests/player-review.test.mjs
+          node --test tests/player-failure.test.mjs tests/player-review.test.mjs tests/private-song.test.mjs tests/private-song-lifecycle.test.mjs tests/recovery-ui.test.mjs
