@@ -20,7 +20,8 @@ ORIGIN = "https://veqpmdsiqcjjpxgcubrp.supabase.co"
 ORDER_TABLE = "anthemsmith_recovery_orders"
 UPLOAD_TABLE = "anthemsmith_recovery_uploads"
 ORDER_PATTERN = r"AS-[A-Za-z0-9_-]{1,90}"
-PUBLIC_SUFFIXES = (".json", ".mp3", "-full.mp3", ".blocked.json", ".failed.json", ".delivery.json")
+PUBLIC_SUFFIXES = (".json", ".blocked.json", ".failed.json", ".delivery.json")
+import private_audio as pa
 
 
 class GateError(Exception):
@@ -243,42 +244,81 @@ def audio_ready(root, oid):
         return False
 
 
+def stage_path(root, oid):
+    pa.oid_check(oid)
+    base = Path(os.environ['RUNNER_TEMP']).resolve()
+    if base == root.resolve() or root.resolve() in base.parents:
+        raise GateError('private_staging_must_be_outside_checkout')
+    stage = base / 'anthemsmith-private' / oid
+    stage.mkdir(parents=True, exist_ok=True, mode=0o700)
+    return stage
+
+
 def forge(root, run=subprocess.run):
     order = read_private()
-    oid = order["order_id"]
-    if audio_ready(root, oid):
-        output("audio_ready", "true")
-        print("Existing complete audio retained; generation not repeated.")
+    oid = order['order_id']
+    output('audio_ready', 'false')
+    try:
+        pa.require_config()
+        # This check precedes local-file inspection and every chargeable call.
+        manifest, context, row = pa.read_state(oid)
+        if manifest:
+            pa.verify_edge(oid, manifest, context)
+        else:
+            if row['delivery_result']:
+                raise GateError('operator_notification_reconciliation_required')
+            # Old public outputs are evidence, not permission to generate again.
+            if any((root / 'songs' / (oid + s)).exists() for s in
+                   ('.mp3', '-full.mp3', '.json', '.claim.json')):
+                raise GateError('legacy_audio_reconciliation_required')
+            stage = stage_path(root, oid)
+            full = stage / 'songs' / (oid + '-full.mp3')
+            job = row['delivery'].get('private_audio_job')
+            if not full.exists():
+                pa.output_hosts()  # Fail before spend when download hosts are unreviewed.
+                if job and job.get('status') != 'preflight_failed':
+                    pa.resume_generation(oid, full)  # GET/poll only; never submit again.
+                else:
+                    # Revalidate canonical source/payment immediately before reserving spend.
+                    order = canonical_order(oid)
+                    job = pa.reserve_generation(oid)
+                    env = child_environment(order)
+                    env.update(AS_PRIVATE_RECOVERY='1', AS_GENERATION_ATTEMPT=job['attempt_id'])
+                    completed = run([sys.executable, str(root / 'scripts' / 'forge_order.py')],
+                        cwd=stage, env=env, capture_output=True, text=True)
+                    # Child stdout/stderr may contain source material. Never forward them.
+                    if completed.returncode:
+                        current = pa.snapshot(oid)['delivery'].get('private_audio_job')
+                        if current == job and current.get('status') == 'reserved':
+                            # Confirmed child exit, no submitting CAS: safe preflight retry.
+                            pa.job_transition(oid, job, {**job, 'status': 'preflight_failed'})
+                        raise GateError('forge_failed_or_audio_incomplete')
+            elif not job:
+                raise GateError('unbound_staged_audio_reconciliation_required')
+            manifest, context = pa.register_audio(oid, full)
+        write_json(root / 'songs' / (oid + '.json'), {'order_id': oid,
+            'status': 'audio_ready', 'private_audio': True,
+            'duration_full': manifest['duration_seconds']})
+        for suffix in ('.failed.json', '.blocked.json'):
+            (root / 'songs' / (oid + suffix)).unlink(missing_ok=True)
+        output('audio_ready', 'true')
+        print('Private audio and customer readback verified; notification remains separate.')
         return 0
-    if order.get("public_audio_consent") is not True:
-        record_blocked(root, oid, "private_audio_delivery_not_configured")
-        output("audio_ready", "false")
-        print("Generation held: private output delivery required, no public sharing authorization.")
+    except (pa.PrivateAudioError, GateError) as exc:
+        record_blocked(root, oid, str(exc))
+        print('Private forge held: ' + str(exc))
         return 1
-    completed = run([sys.executable, "scripts/forge_order.py"], cwd=root,
-        env=child_environment(order), capture_output=True, text=True)
-    # Do not print provider bodies, raw customer captions or contacts from legacy scripts.
-    ready = audio_ready(root, oid)
-    output("audio_ready", "true" if ready else "false")
-    if completed.returncode != 0 or not ready:
-        if not any((root / "songs" / (oid + suffix)).exists() for suffix in (".failed.json", ".blocked.json")):
-            write_json(root / "songs" / f"{oid}.failed.json", {
-                "order_id": oid, "status": "failed", "reason": "forge_failed_or_audio_incomplete"})
-        print("Forge failed; failure evidence and any existing audio are retained.")
-        return 1
-    # Remove obsolete failure markers only after a complete, successful forge.
-    for suffix in (".failed.json", ".blocked.json", ".claim.json"):
-        (root / "songs" / (oid + suffix)).unlink(missing_ok=True)
-    print("Audio ready; customer notification is a separate stage.")
-    return 0
 
 
-def persist_delivery(oid, result):
+def persist_delivery(oid, result, expected=None):
     key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
     if not key:
         raise GateError("private_delivery_store_not_configured")
+    params = {"order_id": "eq." + oid}
+    if expected is not None:
+        params["delivery_result"] = "eq." + json.dumps(expected, separators=(",", ":"))
     request = urllib.request.Request(ORIGIN + "/rest/v1/" + ORDER_TABLE + "?" +
-        urllib.parse.urlencode({"order_id": "eq." + oid}),
+        urllib.parse.urlencode(params),
         data=json.dumps({"delivery_result": result}).encode(), method="PATCH",
         headers={"Authorization": "Bearer " + key, "apikey": key,
                  "Content-Type": "application/json", "Prefer": "return=representation"})
@@ -318,13 +358,17 @@ def private_delivery(oid):
     return rows[0]["delivery_result"]
 
 
-def reserve_notification(oid, attempt):
+def reserve_notification(oid, attempt, expected_delivery=None):
     """Atomic empty-outbox -> sending. Never take over an ambiguous send."""
     key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
     if not key:
         raise GateError("private_delivery_store_not_configured")
     proposed = {"order_id": oid, "delivery_status": "sending", "attempt_id": attempt}
-    query = urllib.parse.urlencode({"order_id": "eq." + oid, "delivery_result": "eq.{}"})
+    filters = {"order_id": "eq." + oid, "delivery_result": "eq.{}"}
+    if expected_delivery is not None:
+        filters.update(delivery="eq." + json.dumps(expected_delivery, separators=(",", ":")),
+                       status="eq.source_received", payment_state="eq.verified_paid")
+    query = urllib.parse.urlencode(filters)
     request = urllib.request.Request(ORIGIN + "/rest/v1/" + ORDER_TABLE + "?" + query,
         method="PATCH", data=json.dumps({"delivery_result": proposed}).encode(), headers={
             "Authorization": "Bearer " + key, "apikey": key, "Content-Type": "application/json",
@@ -341,44 +385,46 @@ def reserve_notification(oid, attempt):
         raise GateError("notification_reservation_unverified") from None
 
 
-def verify_served_audio(root, oid):
-    """Read back the exact customer full-audio destination before notifying."""
-    from notification_provider import NoRedirect
-    path = root / 'songs' / (oid + '-full.mp3')
-    size = path.stat().st_size
-    if not 1 <= size <= 50 * 1024 * 1024:
-        raise GateError('full_audio_size_invalid')
-    expected = hashlib.sha256(path.read_bytes()).hexdigest()
-    request = urllib.request.Request('https://raw.githubusercontent.com/LittleDoorClub/anthemsmith-site-live/main/songs/' + oid + '-full.mp3',
-        headers={'User-Agent': 'AnthemSmith/1.0', 'Cache-Control': 'no-cache'})
+def load_private_access(order):
     try:
-        with urllib.request.build_opener(NoRedirect()).open(request, timeout=45) as response:
-            digest, count = hashlib.sha256(), 0
-            while True:
-                chunk = response.read(128 * 1024)
-                if not chunk:
-                    break
-                count += len(chunk)
-                if count > size:
-                    raise ValueError('oversize')
-                digest.update(chunk)
-        if count != size or digest.hexdigest() != expected:
-            raise ValueError('audio mismatch')
-        return {'sha256': expected, 'bytes': size}
-    except Exception:
-        raise GateError('full_audio_not_yet_available_at_customer_url') from None
+        manifest, context, row = pa.read_state(order['order_id'])
+        if not manifest:
+            raise pa.PrivateAudioError('private_audio_not_registered')
+        d = row['delivery']
+        mode = d.get('mode') or ('email' if d.get('email') and not d.get('sms_to') else
+                                 'sms' if d.get('sms_to') and not d.get('email') else '')
+        if (mode != order.get('delivery') or
+                any(d.get(k, '').strip() != order.get(k, '') for k in ('email', 'sms_to')) or
+                (d.get('consent_verified') is True) != order.get('consent_verified')):
+            raise pa.PrivateAudioError('private_audio_recipient_changed')
+        return context, d
+    except pa.PrivateAudioError as exc:
+        raise GateError(str(exc)) from None
+
+
+def verify_served_audio(root, oid):
+    """Use the real bearer-header customer route, never GitHub/raw/public audio."""
+    try:
+        manifest, context, _ = pa.read_state(oid)
+        if not manifest:
+            raise pa.PrivateAudioError('private_audio_not_registered')
+        return pa.verify_edge(oid, manifest, context)
+    except pa.PrivateAudioError as exc:
+        raise GateError(str(exc)) from None
 
 
 def deliver(root, send=None, lookup=None, persist=None, read=None, reserve=None, verify=verify_served_audio):
     from notification_provider import send as provider_send, lookup as provider_lookup, NotificationError
     send, lookup = send or provider_send, lookup or provider_lookup
-    persist, read, reserve = persist or persist_delivery, read or private_delivery, reserve or reserve_notification
+    read = read or private_delivery
     order = read_private()
     oid = order["order_id"]
-    if not audio_ready(root, oid):
-        raise GateError("audio_not_ready_for_delivery")
+    context, delivery_context = load_private_access(order)
+    order = {**order, "private_song_access": context}
+    reserve = reserve or (lambda oid, attempt: reserve_notification(oid, attempt, delivery_context))
     path = root / "songs" / f"{oid}.delivery.json"
     persisted = read(oid)  # Fresh private state, never a stale runner copy or public JSON.
+    persist = persist or (lambda oid, result: persist_delivery(oid, result, persisted))
     state = persisted.get("delivery_status")
     if state == "delivered":
         write_json(path, public_receipt(oid, persisted))
@@ -416,7 +462,9 @@ def deliver(root, send=None, lookup=None, persist=None, read=None, reserve=None,
         return 1
     verify(root, oid)
     attempt = str(uuid.uuid4())
-    reserve(oid, attempt)  # Durable compare-and-set before the first provider side effect.
+    reserved = reserve(oid, attempt)  # Durable compare-and-set before the first provider side effect.
+    # Closure above now CASes against our sending reservation, not the old empty row.
+    persisted = reserved if isinstance(reserved, dict) else {"order_id": oid, "delivery_status": "sending", "attempt_id": attempt}
     try:
         result = send(order, attempt)
     except NotificationError as exc:
@@ -461,6 +509,8 @@ def sanitize_public_artifacts(root, oid):
             duration = data.get('duration_full')
             if isinstance(duration, (int, float)) and 0 < duration <= 3600:
                 safe['duration_full'] = duration
+            if data.get('private_audio') is True:
+                safe['private_audio'] = True
             if type(data.get('grounded_photo_lyrics')) is bool:
                 safe['grounded_photo_lyrics'] = data['grounded_photo_lyrics']
             for key in ('sha256_full', 'sha256_preview'):
@@ -486,7 +536,9 @@ def publish(root, oid):
             "order_id": oid, "status": "failed", "reason": "workflow_preparation_or_forge_failed"})
     # No git add songs/: explicit order-scoped allowlist prevents unrelated files/PII from publishing.
     paths = ["songs/" + oid + suffix for suffix in PUBLIC_SUFFIXES]
-    paths.append("songs/" + oid + ".claim.json")
+    staged = set(git(root, ["diff", "--cached", "--name-only"]).stdout.splitlines())
+    if staged - set(paths):
+        raise GateError("unexpected_staged_public_files")
     tracked = set(git(root, ["ls-files", "--", *paths]).stdout.splitlines())
     present = [p for p in paths if (root / p).exists() or p in tracked]
     if not present:
@@ -504,7 +556,7 @@ def publish(root, oid):
     git(root, ["commit", "-m", "order status " + oid])
     for _ in range(3):
         if git(root, ["push", "origin", "HEAD:main"], check=False).returncode == 0:
-            print("Order audio/status committed and pushed.")
+            print("Allowlisted order metadata committed and pushed; no audio published.")
             return 0
         git(root, ["fetch", "origin", "main"])
         if git(root, ["rebase", "origin/main"], check=False).returncode:
@@ -529,7 +581,7 @@ def main():
             private_path().unlink(missing_ok=True)
             return 0
         raise GateError("unknown_workflow_command")
-    except (GateError, OSError, ValueError, subprocess.SubprocessError, KeyError):
+    except (GateError, pa.PrivateAudioError, OSError, ValueError, subprocess.SubprocessError, KeyError):
         print("Workflow stage failed safely; inspect order status and runner stage outcome.")
         return 1
 

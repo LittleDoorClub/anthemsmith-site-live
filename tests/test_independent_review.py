@@ -18,6 +18,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import order_workflow as w
 import notification_provider as n
+from private_audio_fixtures import pair
 
 OID = 'AS-OFFLINEREVIEW'
 PHONE = '+' + '12025550123'
@@ -41,6 +42,7 @@ class FakeWire(urllib.request.BaseHandler):
         self.calls.append(request)
         status, payload, location = self.responder(request)
         headers = Message()
+        headers['Content-Type'] = 'audio/mpeg'
         if location: headers['Location'] = location
         response = urllib.response.addinfourl(io.BytesIO(payload), headers, request.full_url, status)
         response.msg = 'offline fixture'
@@ -54,7 +56,9 @@ class IndependentTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         (self.root / 'songs').mkdir()
         self.order = {'order_id': OID, 'consent_verified': True, 'delivery_valid': True,
-                      'delivery': 'sms', 'sms_to': PHONE, 'email': '', 'photo_urls': []}
+                      'delivery': 'sms', 'sms_to': PHONE, 'email': '', 'photo_urls': [], 'private_song_access': pair(OID)[1]}
+        access = patch.object(w, 'load_private_access', return_value=(pair(OID)[1], {}))
+        access.start(); self.addCleanup(access.stop)
         self.env = patch.dict(os.environ, ENV)
         self.env.start(); self.addCleanup(self.env.stop)
     def email_order(self):
@@ -136,7 +140,9 @@ class IndependentTests(unittest.TestCase):
         self.assertEqual([request.get_method() for request in calls], ['PATCH', 'GET'])
     def test_fresh_media_exact_bytes_and_hash_mismatch(self):
         payload = b'offline fixture bytes, hash layer only'
-        (self.root / 'songs' / (OID + '-full.mp3')).write_bytes(payload)
+        manifest, context = pair(OID, payload)
+        state = patch.object(w.pa, 'read_state', return_value=(manifest, context, {}))
+        state.start(); self.addCleanup(state.stop)
         for served, valid in ((payload, True), (payload[:-1], False), (b'x' * len(payload), False), (payload + b'x', False)):
             wire = FakeWire(lambda request: (200, served, None))
             actual_build = urllib.request.build_opener

@@ -6,6 +6,10 @@ Anti-hallucination: only text visible on the public profile (bio + recent captio
 unknown facts stay null. No logged-in access anywhere."""
 import json, os, re, sys, time, hashlib, subprocess, urllib.request
 
+PRIVATE_RECOVERY = os.environ.get("AS_PRIVATE_RECOVERY") == "1"
+if PRIVATE_RECOVERY:
+    import private_audio as private_audio_worker
+
 # ============================================================
 # PAYMENT GATE (top of forge — before ANY scrape/generation).
 # The relay poller forwards the order payload's paid field verbatim
@@ -68,6 +72,18 @@ def die(msg):
     with open(f"{OUT}/{OID}.failed.json", "w") as failure_file:
         json.dump({"order_id": OID, "status": "failed", "reason": msg}, failure_file)
     sys.exit(1)
+
+# Private worker preflight: no source/model calls on an uncertain prior attempt.
+if PRIVATE_RECOVERY:
+    try:
+        private_audio_worker.require_config()
+        existing, _, row = private_audio_worker.read_state(OID)
+        job = row["delivery"].get("private_audio_job", {})
+        if (existing or row["delivery_result"] or job.get("status") != "reserved" or
+                job.get("attempt_id") != os.environ.get("AS_GENERATION_ATTEMPT")):
+            die("generation_reconciliation_required")
+    except private_audio_worker.PrivateAudioError as error:
+        die(str(error))
 
 # ---------- 0. PHOTO INTAKE (durable private objects, then actual vision) ----------
 photo_descriptions, photo_ocr_texts, photo_storage_paths, photo_analysis = [], [], [], []
@@ -512,6 +528,11 @@ Nothing borrowed, nothing fake, exactly as you are.
 
 # ---------- 5. GENERATE (MuAPI Suno V6, instrumental=false, 2 takes) ----------
 def post(body):
+    if PRIVATE_RECOVERY:
+        try:
+            return {"request_id": private_audio_worker.submit_generation(OID, body)}
+        except private_audio_worker.PrivateAudioError as error:
+            die(str(error))
     req = urllib.request.Request("https://api.muapi.ai/api/v1/suno-create-music",
         data=json.dumps(body).encode(), method="POST",
         headers={"x-api-key": MUAPI, "Content-Type": "application/json"})
@@ -519,6 +540,11 @@ def post(body):
         return json.loads(r.read())
 
 def poll(rid, max_s=840):
+    if PRIVATE_RECOVERY:
+        try:
+            return private_audio_worker.poll_generation(rid, max_s)
+        except private_audio_worker.PrivateAudioError as error:
+            die(str(error))
     t0 = time.time()
     while time.time() - t0 < max_s:
         time.sleep(20)
@@ -537,17 +563,20 @@ def poll(rid, max_s=840):
 gender = "male" if VOICE.lower().startswith("m") else ("female" if VOICE.lower().startswith("f") else "male")
 model_used = "V6"
 sub = post({"prompt": lyrics, "style": style, "title": song_title, "custom_mode": True,
-            "instrumental": False, "vocal_gender": gender, "model": "V6", "duration": 205,
+            "instrumental": False, "vocal_gender": gender, "model": "V6", "duration": 210,
             "negative_tags": "sad, ballad, piano lead, cheesy, autotune"})
 rid = sub.get("request_id") or sub.get("requestId") or (sub.get("data") or {}).get("request_id")
 res = poll(rid)
 d = res.get("data") or res
 outs = d.get("outputs") or []
+if not outs and PRIVATE_RECOVERY:
+    die("generation_output_reconciliation_required")
 if not outs:
+    # Legacy normal-backend behavior is outside the private recovery worker.
     # V6 422-style fallback: one V4_5 shot
     model_used = "V4_5"
     sub = post({"prompt": lyrics, "style": style, "title": song_title, "custom_mode": True,
-                "instrumental": False, "vocal_gender": gender, "model": "V4_5",
+                "instrumental": False, "vocal_gender": gender, "model": "V4_5", "duration": 210,
                 "negative_tags": "sad, ballad, piano lead, cheesy, autotune"})
     rid = sub.get("request_id") or (sub.get("data") or {}).get("request_id")
     res = poll(rid)
@@ -563,8 +592,17 @@ def probe_dur(p):
     return float(r.stdout.strip())
 
 u = outs[0]
-a1 = fetch(u, timeout=120); open(f"{OUT}/{OID}-t1.mp3", "wb").write(a1)
-a2 = fetch(u, timeout=120); open(f"{OUT}/{OID}-t1v.mp3", "wb").write(a2)
+if PRIVATE_RECOVERY:
+    try:
+        private_audio_worker.download_output(res, f"{OUT}/{OID}-t1.mp3")
+    except private_audio_worker.PrivateAudioError as error:
+        die(str(error))
+    a1 = open(f"{OUT}/{OID}-t1.mp3", "rb").read()
+    a2 = a1  # download_output already verified two bounded identical downloads + full decode.
+    open(f"{OUT}/{OID}-t1v.mp3", "wb").write(a2)
+else:
+    a1 = fetch(u, timeout=120); open(f"{OUT}/{OID}-t1.mp3", "wb").write(a1)
+    a2 = fetch(u, timeout=120); open(f"{OUT}/{OID}-t1v.mp3", "wb").write(a2)
 assert hashlib.sha256(a1).hexdigest() == hashlib.sha256(a2).hexdigest(), "byte-stability failed"
 dur = probe_dur(f"{OUT}/{OID}-t1.mp3")
 if photo_analysis and not 180 <= dur <= 240:

@@ -34,6 +34,10 @@ jobs:
     if: github.event_name == 'repository_dispatch' || (github.event_name == 'workflow_dispatch' && inputs.order_id)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # Opt-in only after bucket/edge/player deployment and synthetic acceptance.
+      AS_PRIVATE_AUDIO_ENABLED: ${{ vars.AS_PRIVATE_AUDIO_ENABLED }}
+      AS_MUAPI_OUTPUT_HOSTS: ${{ vars.AS_MUAPI_OUTPUT_HOSTS }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -65,7 +69,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python scripts/order_workflow.py forge
 
-      - name: Publish audio or blocked/failed status even when forge fails
+      - name: Publish allowlisted metadata only, including blocked/failed status
         id: publish_audio
         if: always() && steps.prepare.outputs.valid_order == 'true'
         env:
@@ -74,7 +78,7 @@ jobs:
           FORGE_OUTCOME: ${{ steps.forge.outcome }}
         run: python scripts/order_workflow.py publish
 
-      - name: Deliver only after audio has been published
+      - name: Deliver only after private publish succeeded and customer edge readback
         id: delivery
         if: always() && !cancelled() && steps.prepare.outputs.ready == 'true' && steps.forge.outputs.audio_ready == 'true' && steps.publish_audio.outcome == 'success'
         env:

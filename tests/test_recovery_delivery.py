@@ -11,6 +11,7 @@ from unittest.mock import patch, Mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import order_workflow as w
 import notification_provider as n
+from private_audio_fixtures import pair
 
 OID = 'AS-RECOVERYFIX'
 PHONE = '+12025550123'
@@ -23,7 +24,7 @@ class ProviderTests(unittest.TestCase):
     def setUp(self):
         self.e = patch.dict(os.environ, ENV); self.e.start(); self.addCleanup(self.e.stop)
         self.order = {'order_id': OID, 'consent_verified': True, 'delivery_valid': True,
-                      'delivery': 'sms', 'sms_to': PHONE, 'email': ''}
+                      'delivery': 'sms', 'sms_to': PHONE, 'email': '', 'private_song_access': pair(OID)[1]}
 
     def test_sms_queued_is_not_delivered_and_has_no_extra_cc_or_upsell(self):
         calls = []
@@ -96,6 +97,8 @@ class WorkflowTests(unittest.TestCase):
         self.read_patch.start(); self.audio_patch.start()
         self.addCleanup(self.read_patch.stop); self.addCleanup(self.audio_patch.stop)
         self.calls = 0
+        access = patch.object(w, "load_private_access", return_value=(pair(OID)[1], {}))
+        access.start(); self.addCleanup(access.stop)
 
     def reserve(self, oid, attempt):
         self.assertFalse(self.state)
@@ -174,7 +177,9 @@ class WorkflowTests(unittest.TestCase):
 
     def test_existing_full_audio_preserved_without_regeneration(self):
         run = Mock(side_effect=AssertionError('must not regenerate'))
-        self.assertEqual(w.forge(self.root, run), 0)
+        manifest, context = pair(OID)
+        with patch.object(w.pa, "require_config"), patch.object(w.pa, "read_state", return_value=(manifest, context, {})), patch.object(w.pa, "verify_edge"):
+            self.assertEqual(w.forge(self.root, run), 0)
         run.assert_not_called()
 
     def test_no_consent_keeps_audio_pending_without_side_effect(self):

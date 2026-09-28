@@ -94,6 +94,13 @@ def send(order, attempt, http=http_json):
         raise NotificationError('invalid_order_id')
     if order.get('consent_verified') is not True or not order.get('delivery_valid'):
         raise NotificationError('notification_not_authorized')
+    from private_audio import context_token, PrivateAudioError
+    context = order.get('private_song_access')
+    try:
+        context_token(oid, context)
+    except PrivateAudioError:
+        raise NotificationError('private_song_access_required') from None
+    link = context['url']
     mode = order.get('delivery')
     if mode == 'sms':
         if order.get('email') or not re.fullmatch(r'\+[1-9]\d{7,14}', order.get('sms_to', '')):
@@ -103,7 +110,7 @@ def send(order, attempt, http=http_json):
         if not re.fullmatch(r'\+[1-9]\d{7,14}', sender):
             raise NotificationError('sms_sender_not_configured')
         headers['Content-Type'] = 'application/x-www-form-urlencoded'
-        body = 'AnthemSmith: your full song is ready. Play or download: https://anthemsmith.com/?oid=' + oid + '. No additional payment is required.'
+        body = 'AnthemSmith: your full song is ready. Play or download: ' + link + '\nNo additional payment is required.'
         request = urllib.request.Request('https://api.twilio.com/2010-04-01/Accounts/' + sid + '/Messages.json',
             data=urllib.parse.urlencode({'From': sender, 'To': order['sms_to'], 'Body': body}).encode(),
             headers=headers, method='POST')
@@ -122,7 +129,7 @@ def send(order, attempt, http=http_json):
         request = urllib.request.Request('https://api.resend.com/emails', method='POST', headers=headers,
             data=json.dumps({'from': 'AnthemSmith <songs@anthemsmith.com>', 'to': [order['email']],
                 'subject': 'Your AnthemSmith song is ready',
-                'text': 'Your full song is ready.\n\nPlay or download: https://anthemsmith.com/?oid=' + oid +
+                'text': 'Your full song is ready.\n\nPlay or download: ' + link +
                         '\n\nNo additional payment is required.\n\n— AnthemSmith'}).encode())
         result = http(request)
         provider_id = result.get('id')
