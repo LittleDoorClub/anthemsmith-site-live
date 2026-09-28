@@ -150,8 +150,15 @@ function notificationText(id,receipt){
  if(!receipt||receipt.order_id!==id)return 'Notification delivery has not been confirmed.';
  if(receipt.delivery_status==='delivered'&&receipt.provider_status==='delivered')return 'Notification delivery confirmed.';
  if(receipt.delivery_status==='submitted')return 'Notification submitted; delivery is not yet confirmed.';
- if(receipt.delivery_status==='failed')return 'Your notification could not be delivered. You can still use the player when the audio loads.';
+ if(receipt.delivery_status==='failed')return 'Your notification could not be delivered. Contact support with this order ID.';
  return 'Notification delivery has not been confirmed.';
+}
+function renderPrivateSong(id,box,receipt){
+ // Private delivery: the public page must never probe a public MP3 that intentionally does not exist.
+ box.innerHTML='<h3 data-order-title></h3><p>Order '+id+' was delivered privately. Open the private link from your delivery message to play or download the song. If you cannot find that message, contact <a href="https://www.instagram.com/anthemsmith/" target="_blank" rel="noopener">@AnthemSmith</a> or email <a href="mailto:'+AS_EMAIL+'">'+AS_EMAIL+'</a> with this order ID. <strong>Do not pay again.</strong></p><p data-order-notification class="small"></p>';
+ box.querySelector('[data-order-title]').textContent='Your full song is ready.';
+ box.querySelector('[data-order-notification]').textContent=notificationText(id,receipt);
+ return null;
 }
 function renderExistingSong(id,box,receipt,isCurrent){
  const full=songURL(id);
@@ -219,7 +226,7 @@ function watchOrder(id,box,tries){
    // Keep existing audio despite stale failures; only media events prove browser playability.
    if(manifest&&['audio_ready','delivered'].includes(manifest.status)){
     clearInterval(state.timer);
-    state.dispose=renderExistingSong(id,box,receipt,current);
+    state.dispose=manifest.private_audio===true?renderPrivateSong(id,box,receipt):renderExistingSong(id,box,receipt,current);
     return;
    }
    if((rb&&rb.ok)||(rf&&rf.ok)||(rr&&rr.ok)){

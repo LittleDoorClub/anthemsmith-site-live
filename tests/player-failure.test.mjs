@@ -42,6 +42,19 @@ async function harness(responses = {}) {
     timeout() { for (const fn of [...timeouts.values()]) fn(); }
   };
 }
+test('private-manifest order points to the private link instead of claiming a public load failure', async () => {
+  const h = await harness({ 'AS-TEST.json': { status: 'audio_ready', private_audio: true } }); await h.start();
+  assert.match(h.el('[data-order-title]').textContent, /private|ready/i);
+  assert.doesNotMatch(h.box.innerHTML, /could not load/i);
+  assert.match(h.box.innerHTML, /Do not pay again/);
+  assert.equal(h.box.innerHTML.includes('<audio'), false);
+  assert.equal(h.intervals.size, 0);
+});
+test('private order never probes the public MP3 URL on any read', async () => {
+  const h = await harness({ 'AS-TEST.json': { status: 'audio_ready', private_audio: true } }); await h.start();
+  assert.equal(h.calls.some(c => c.url.includes('-full.mp3')), false);
+  assert.ok(h.calls.every(c => c.method === 'GET'));
+});
 const ready = { 'AS-TEST.json': { status: 'audio_ready' } };
 test('manifest alone does not say playable; browser canplay reveals full link', async () => {
   const h = await harness(ready); await h.start();
