@@ -1,5 +1,5 @@
 """Create a fresh upload capability token for AS-MUIJ11B6, store sha256 in DB, print recovery URL."""
-import hashlib, json, os, re, secrets, base64, urllib.request
+import hashlib, json, os, re, secrets, base64, sys, urllib.request
 from datetime import datetime, timezone, timedelta
 
 ORIGIN = "https://veqpmdsiqcjjpxgcubrp.supabase.co"
@@ -26,7 +26,7 @@ if len(rows) != 1:
     exit(1)
 
 row = rows[0]
-print(f"STATUS: {row['status']} PAYMENT: {row['payment_state']} REF: {row.get('payment_ref')}")
+print(f"STATUS: {row['status']} PAYMENT: {row['payment_state']} REF: {row.get('payment_ref')}", file=sys.stderr)
 
 # Generate fresh token (32 random bytes -> 43-char base64url)
 token_bytes = secrets.token_bytes(32)
@@ -40,7 +40,7 @@ expires = now + timedelta(hours=24)
 # CAS update: only if token is not already set
 if row.get("token_sha256"):
     # Revoke old token
-    print(f"REVOKING existing token issued {row.get('token_issued_at')}")
+    print(f"REVOKING existing token issued {row.get('token_issued_at')}", file=sys.stderr)
 
 body = json.dumps({
     "token_sha256": token_sha,
@@ -77,11 +77,11 @@ if len(final) != 1 or final[0].get("token_sha256") != token_sha:
 # Get delivery contact
 delivery = final[0].get("delivery", {})
 phone = delivery.get("sms_to", "")
-print(f"PHONE: {phone}")
+print(f"PHONE: {phone}", file=sys.stderr)
 
 recovery_url = f"{RECOVERY_URL}#order={OID}&token={token}"
-print(f"URL: {recovery_url}")
-print(f"TOKEN_SHA: {token_sha}")
-print(f"EXPIRES: {expires.isoformat()}")
+print(f"URL: {recovery_url}", file=sys.stderr)
+print(f"TOKEN_SHA: {token_sha}", file=sys.stderr)
+print(f"EXPIRES: {expires.isoformat()}", file=sys.stderr)
 print(json.dumps({"result": "token_created", "order_id": OID, "delivery_mode": delivery.get("mode"),
                   "delivery_phone": phone, "url": recovery_url}))
