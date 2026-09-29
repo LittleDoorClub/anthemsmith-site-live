@@ -59,6 +59,7 @@ REFERENCE_URL = (os.environ.get("REFERENCE_URL") or "").strip()
 PHOTO_URLS = (os.environ.get("PHOTO_URLS") or "").strip()
 INTAKE = (os.environ.get("INTAKE") or "").strip().lower()
 OPENAI_KEY = (os.environ.get("OPENAI_API_KEY") or "").strip()
+OR_KEY = (os.environ.get("OPENROUTER_API_KEY") or "").strip()
 SUPABASE_SR_KEY = (os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
 SUPABASE_URL = "https://veqpmdsiqcjjpxgcubrp.supabase.co"
 

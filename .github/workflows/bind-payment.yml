@@ -1,0 +1,20 @@
+name: bind-payment-one-shot
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Bind AS-MUIJ11B6 → Venmo 4694831192117582167
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python scripts/bind_payment_one_shot.py

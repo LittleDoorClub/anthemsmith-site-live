@@ -23,7 +23,13 @@ MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_TOTAL_BYTES = 50 * 1024 * 1024
 MAX_PIXELS = 25_000_000
 FORMATS = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp"}
-MODEL = "gpt-4o"
+MODEL = "openai/gpt-4o"
+
+import os as _os
+_OPENAI_KEY = (_os.environ.get("OPENAI_API_KEY") or "").strip()
+_OR_KEY = (_os.environ.get("OPENROUTER_API_KEY") or "").strip()
+_API_BASE = "https://openrouter.ai/api/v1" if _OR_KEY else "https://api.openai.com/v1"
+_API_KEY = _OR_KEY or _OPENAI_KEY
 
 
 class PhotoIntakeError(Exception):
@@ -178,7 +184,7 @@ def _intake_photos(references, order_id, supabase_url, service_key, openai_key, 
     """
     if not re.fullmatch(r"AS-[A-Za-z0-9_-]{1,90}", order_id):
         raise PhotoIntakeError("invalid_order_id")
-    if not service_key or not openai_key:
+    if not service_key or not _API_KEY:
         raise PhotoIntakeError("photo_configuration_missing")
     origin = urllib.parse.urlsplit(supabase_url)
     if (origin.scheme != "https" or origin.path not in ("", "/") or origin.query or
@@ -234,9 +240,10 @@ def _intake_photos(references, order_id, supabase_url, service_key, openai_key, 
             {"type": "image_url", "image_url": {
                 "url": "data:" + mime + ";base64," + base64.b64encode(data).decode(), "detail": "high"}}
         ]}], "response_format": {"type": "json_object"}, "max_tokens": 1800, "temperature": 0.2}
-        request = urllib.request.Request("https://api.openai.com/v1/chat/completions",
+        request = urllib.request.Request(_API_BASE + "/chat/completions",
             data=json.dumps(body).encode(), method="POST",
-            headers={"Authorization": "Bearer " + openai_key, "Content-Type": "application/json"})
+            headers={"Authorization": "Bearer " + _API_KEY, "Content-Type": "application/json",
+                     "HTTP-Referer": "https://anthemsmith.com", "X-Title": "AnthemSmith"})
         try:
             response, _ = http(request, 90, 128 * 1024)
         except PhotoIntakeError:

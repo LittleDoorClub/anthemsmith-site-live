@@ -1,0 +1,7 @@
+{
+ "order_id": "TEST-ERRCAP",
+ "delivery_status": "failed",
+ "ts": 1790382146.5420346,
+ "mode": "email",
+ "detail": "Email mode selected but no email address"
+}

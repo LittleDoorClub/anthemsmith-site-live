@@ -11,8 +11,14 @@ import re
 import urllib.request
 from dataclasses import dataclass
 
-MODEL = "gpt-4o-2024-08-06"
+MODEL = "openai/gpt-4o-2024-08-06"
 SECTION_NAMES = ["Verse 1", "Chorus", "Verse 2", "Chorus", "Bridge", "Final Chorus"]
+
+import os as _os
+_OPENAI_KEY = (_os.environ.get("OPENAI_API_KEY") or "").strip()
+_OR_KEY = (_os.environ.get("OPENROUTER_API_KEY") or "").strip()
+_API_BASE = "https://openrouter.ai/api/v1" if _OR_KEY else "https://api.openai.com/v1"
+_API_KEY = _OR_KEY or _OPENAI_KEY
 
 
 class GroundedLyricsError(Exception):
@@ -59,9 +65,10 @@ def _call(key, system, data, schema, name, temperature, http):
         {"role": "user", "content": json.dumps(data, ensure_ascii=False)}],
         "response_format": {"type": "json_schema", "json_schema":
                             {"name": name, "strict": True, "schema": schema}}}
-    request = urllib.request.Request("https://api.openai.com/v1/chat/completions",
+    request = urllib.request.Request(_API_BASE + "/chat/completions",
         data=json.dumps(payload).encode(), method="POST", headers={
-            "Authorization": "Bearer " + key, "Content-Type": "application/json"})
+            "Authorization": "Bearer " + _API_KEY, "Content-Type": "application/json",
+            "HTTP-Referer": "https://anthemsmith.com", "X-Title": "AnthemSmith"})
     try:
         response = json.loads(http(request, 90, 160 * 1024))
         choices = response.get("choices", [])
@@ -184,7 +191,7 @@ def compose_photo_lyrics(analysis, brief, category, mood, voice, api_key, http=_
     A 220–520-word arrangement is a 3–4 minute composition target, not a duration
     claim. The audio worker must separately measure/reject an invalid duration.
     """
-    if not api_key:
+    if not _API_KEY:
         raise GroundedLyricsError("lyrics_configuration_missing")
     if any(not isinstance(v, str) or len(v) > 160 for v in (category, mood, voice)):
         raise GroundedLyricsError("lyrics_preferences_invalid")
