@@ -1,0 +1,65 @@
+name: recovery-send-token
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Mint fresh upload capability token for AS-MUIJ11B6
+        id: mint
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          python scripts/mint_recovery_token.py > token-output.json
+          cat token-output.json
+      - name: Send recovery link via SMS
+        env:
+          TWILIO_SID: ${{ secrets.TWILIO_SID }}
+          TWILIO_TOKEN: ${{ secrets.TWILIO_TOKEN }}
+          TWILIO_FROM: ${{ secrets.TWILIO_FROM }}
+          GABE_CC: ${{ secrets.GABE_CC }}
+        run: |
+          python -c "
+          import json, urllib.request, base64, os
+          data = json.load(open('token-output.json'))
+          url = data['url']
+          phone = data['delivery_phone']
+          msg = f'AnthemSmith: your song order {data[\"order_id\"]} is ready for photos. Upload here (link expires in 24h): {url}  Do not pay again — your order is already paid. - The AnthemSmith team'
+          print(f'SENDING to {phone}')
+          print(f'MSG: {msg[:80]}...')
+
+          sid = os.environ['TWILIO_SID']
+          token = os.environ['TWILIO_TOKEN']
+          from_num = os.environ['TWILIO_FROM']
+
+          # Also CC Gabe
+          gabe_cc = os.environ.get('GABE_CC', '')
+          targets = [phone]
+          if gabe_cc and gabe_cc != phone:
+              targets.append(gabe_cc)
+
+          for target in targets:
+              body = urllib.parse.urlencode({
+                  'To': target, 'From': from_num, 'Body': msg
+              }).encode()
+              req = urllib.request.Request(
+                  f'https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json',
+                  data=body, method='POST',
+                  headers={'Authorization': 'Basic ' + base64.b64encode(f'{sid}:{token}'.encode()).decode()}
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as r:
+                      result = json.load(r)
+                  print(f'SENT to {target}: {result.get(\"status\", \"?\")} sid={result.get(\"sid\", \"?\")}')
+              except urllib.error.HTTPError as e:
+                  print(f'FAILED to {target}: {e.code} {e.read().decode()[:200]}')
+          "
