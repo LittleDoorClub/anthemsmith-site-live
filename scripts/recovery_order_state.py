@@ -44,14 +44,21 @@ def get(path, params, extra=None):
         with urllib.request.urlopen(request, timeout=30) as response:
             if response.status not in (200, 206):
                 raise StateError('unexpected_status_' + str(response.status))
-            return response.read(512 * 1024), dict(response.headers)
+            return response.read(512 * 1024)
     except urllib.error.HTTPError as exc:
         raise StateError('rest_http_' + str(exc.code)) from None
 
 
+def shape(value):
+    """Presence + length only. Never the text itself."""
+    if value is None:
+        return {'present': False, 'chars': 0}
+    text = value if isinstance(value, str) else json.dumps(value, sort_keys=True)
+    return {'present': bool(text.strip()), 'chars': len(text)}
+
+
 def main():
-    raw, _ = get(TABLE, {'order_id': 'eq.' + ORDER, 'select': SELECT, 'limit': '2'})
-    rows = json.loads(raw)
+    rows = json.loads(get(TABLE, {'order_id': 'eq.' + ORDER, 'select': SELECT, 'limit': '2'}))
     if len(rows) != 1 or rows[0].get('order_id') != ORDER:
         raise StateError('order_row_count_' + str(len(rows)))
     row = rows[0]
@@ -67,9 +74,8 @@ def main():
             expired = datetime.fromisoformat(expires) < now
         except Exception:
             expired = 'unparsed'
-    up_raw, _ = get('anthemsmith_recovery_uploads',
-                    {'order_id': 'eq.' + ORDER, 'select': 'object_path,status,sha256,byte_size'},
-                    {'Prefer': 'count=exact'})
+    up_raw = get('anthemsmith_recovery_uploads',
+                 {'order_id': 'eq.' + ORDER, 'select': 'object_path,status,sha256,byte_size'})
     uploads = json.loads(up_raw)
     state = {
         'order_id': ORDER,
@@ -77,6 +83,9 @@ def main():
         'payment_state': row.get('payment_state'),
         'payment_ref_present': row.get('payment_ref') is not None,
         'brief_keys': sorted(brief.keys()),
+        'brief_sources': {k: shape(brief.get(k)) for k in
+                          ('ig_url', 'ig_url2', 'reference_url', 'details', 'recovery_evidence')},
+        'creative': {k: brief.get(k) for k in ('intake', 'category', 'mood', 'voice')},
         'brief_has_recovery_evidence': bool(brief.get('recovery_evidence')),
         'brief_category_present': bool(brief.get('category')),
         'brief_voice_present': bool(brief.get('voice')),
