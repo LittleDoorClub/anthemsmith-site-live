@@ -39,4 +39,4 @@ jobs:
       - name: Existing-song browser-boundary regressions (offline fixtures)
         run: |
           node --check app.js
-          node --test tests/player-failure.test.mjs tests/player-review.test.mjs tests/private-song.test.mjs tests/private-song-lifecycle.test.mjs tests/recovery-ui.test.mjs
+          node --test tests/player-failure.test.mjs tests/player-review.test.mjs tests/private-song.test.mjs tests/private-song-lifecycle.test.mjs tests/recovery-ui.test.mjs tests/ordering-pause.test.mjs
