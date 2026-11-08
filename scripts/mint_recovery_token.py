@@ -1,4 +1,8 @@
-"""Create a fresh upload capability token for AS-MUIJ11B6, store sha256 in DB, print recovery URL."""
+"""Create a fresh upload capability token for AS-MUIJ11B6, store sha256 in DB.
+
+stdout = machine JSON (redirected to token-output.json, never echoed to the log).
+stderr = masked diagnostics only (TOKEN_SHA + last4 + suffix); never the URL, token or full phone.
+"""
 import hashlib, json, os, re, secrets, base64, sys, urllib.request
 from datetime import datetime, timezone, timedelta
 
@@ -82,10 +86,10 @@ if len(final) != 1 or final[0].get("token_sha256") != token_sha:
 # Get delivery contact
 delivery = final[0].get("delivery", {})
 phone = delivery.get("sms_to", "")
-print(f"PHONE: {phone}", file=sys.stderr)
+print(f"PHONE_SUFFIX: ****{str(phone)[-4:]}", file=sys.stderr)  # MASKED: repo is PUBLIC
 
 recovery_url = f"{RECOVERY_URL}#order={OID}&token={token}"
-print(f"URL: {recovery_url}", file=sys.stderr)
+print(f"TOKEN_LAST4: {token[-4:]} URL_LEN: {len(recovery_url)}", file=sys.stderr)  # NEVER print the URL/token; the stdout JSON carries it to token-output.json for the send step
 print(f"TOKEN_SHA: {token_sha}", file=sys.stderr)
 print(f"EXPIRES: {expires.isoformat()}", file=sys.stderr)
 print(json.dumps({"result": "token_created", "order_id": OID, "delivery_mode": delivery.get("mode"),
