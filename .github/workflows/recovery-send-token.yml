@@ -46,7 +46,7 @@ jobs:
           if not phone:
               raise SystemExit('NO_RECIPIENT: refusing to send')
           msg = f'AnthemSmith: your song order {data[\"order_id\"]} is ready for photos. Upload here (link expires in 24h): {url}  Do not pay again — your order is already paid. - The AnthemSmith team'
-          print(f'SENDING to {phone}')
+          print(f'SENDING to ****{phone[-4:]}')
           print(f'MSG: {msg[:80]}...')
 
           sid = os.environ['TWILIO_SID']
@@ -75,12 +75,12 @@ jobs:
               try:
                   with urllib.request.urlopen(req, timeout=30) as r:
                       result = json.load(r)
-                  print(f'SENT to {target}: {result.get(\"status\", \"?\")} sid={result.get(\"sid\", \"?\")}')
+                  print(f'SENT to ****{target[-4:]}: {result.get(\"status\", \"?\")} sid={result.get(\"sid\", \"?\")}')
                   results.append({'to_suffix': target[-4:], 'provider': 'twilio',
                                   'sid': result.get('sid'), 'status': result.get('status'),
                                   'sent_at': datetime.datetime.now(datetime.timezone.utc).isoformat()})
               except urllib.error.HTTPError as e:
-                  print(f'FAILED to {target}: {e.code} {e.read().decode()[:200]}')
+                  print(f'FAILED to ****{target[-4:]}: {e.code} {e.read().decode()[:200]}')
                   results.append({'to_suffix': target[-4:], 'provider': 'twilio',
                                   'http': e.code, 'status': 'failed'})
                   failed += 1
