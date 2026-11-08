@@ -1,6 +1,11 @@
 name: recovery-send-token
 on:
   workflow_dispatch:
+    inputs:
+      allow_cc:
+        description: 'Also send a copy to GABE_CC. Gates authorise the customer of record ONLY - leave false.'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -27,12 +32,15 @@ jobs:
           TWILIO_TOKEN: ${{ secrets.TWILIO_TOKEN }}
           TWILIO_FROM: ${{ secrets.TWILIO_FROM }}
           GABE_CC: ${{ secrets.GABE_CC }}
+          ALLOW_CC: ${{ inputs.allow_cc }}
         run: |
           python -c "
-          import json, urllib.request, base64, os
+          import json, urllib.request, urllib.error, urllib.parse, base64, os, datetime
           data = json.load(open('token-output.json'))
           url = data['url']
           phone = data['delivery_phone']
+          if not phone:
+              raise SystemExit('NO_RECIPIENT: refusing to send')
           msg = f'AnthemSmith: your song order {data[\"order_id\"]} is ready for photos. Upload here (link expires in 24h): {url}  Do not pay again — your order is already paid. - The AnthemSmith team'
           print(f'SENDING to {phone}')
           print(f'MSG: {msg[:80]}...')
@@ -41,12 +49,16 @@ jobs:
           token = os.environ['TWILIO_TOKEN']
           from_num = os.environ['TWILIO_FROM']
 
-          # Also CC Gabe
-          gabe_cc = os.environ.get('GABE_CC', '')
+          # One recipient unless a gate ticks the dispatch-form box. The customer of record is the default.
+          allow_cc = os.environ.get('ALLOW_CC', 'false').strip().lower() == 'true'
+          gabe_cc = os.environ.get('GABE_CC', '') if allow_cc else ''
           targets = [phone]
           if gabe_cc and gabe_cc != phone:
               targets.append(gabe_cc)
+          print(f'RECIPIENTS: {len(targets)} ALLOW_CC={allow_cc}')
 
+          results = []
+          failed = 0
           for target in targets:
               body = urllib.parse.urlencode({
                   'To': target, 'From': from_num, 'Body': msg
@@ -60,6 +72,20 @@ jobs:
                   with urllib.request.urlopen(req, timeout=30) as r:
                       result = json.load(r)
                   print(f'SENT to {target}: {result.get(\"status\", \"?\")} sid={result.get(\"sid\", \"?\")}')
+                  results.append({'to_suffix': target[-4:], 'provider': 'twilio',
+                                  'sid': result.get('sid'), 'status': result.get('status'),
+                                  'sent_at': datetime.datetime.now(datetime.timezone.utc).isoformat()})
               except urllib.error.HTTPError as e:
                   print(f'FAILED to {target}: {e.code} {e.read().decode()[:200]}')
+                  results.append({'to_suffix': target[-4:], 'provider': 'twilio',
+                                  'http': e.code, 'status': 'failed'})
+                  failed += 1
+          json.dump(results, open('send-results.json', 'w'))
+          if failed:
+              raise SystemExit(f'SEND_FAILED: {failed} of {len(targets)}')
           "
+      - name: Record delivery result on the order row (record only, no status change, no contact)
+        if: always()
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python scripts/record_recovery_delivery.py
