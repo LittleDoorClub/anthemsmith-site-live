@@ -25,7 +25,11 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           python scripts/mint_recovery_token.py > token-output.json
-          cat token-output.json
+          # NEVER cat the token file into the log (Ox 2026-11-08). This repo is PUBLIC and run 42504704040
+          # printed the full upload URL with a live 24h capability token + the payment reference at 17:23Z.
+          # The send step reads token-output.json directly, so the file is all that is needed; print a
+          # masked line so an operator can still see that the mint worked and which row it touched.
+          python -c "import json; d=json.load(open('token-output.json')); u=str(d.get('url','')); tok=u.split('token=',1)[1] if 'token=' in u else ''; print('MINT OK order=%s url_len=%d token_last4=%s recipient=****%s' % (d.get('order_id'), len(u), tok[-4:], str(d.get('delivery_phone',''))[-4:]))"
       - name: Send recovery link via SMS
         env:
           TWILIO_SID: ${{ secrets.TWILIO_SID }}

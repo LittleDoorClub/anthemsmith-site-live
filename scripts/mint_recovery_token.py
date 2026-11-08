@@ -26,7 +26,12 @@ if len(rows) != 1:
     exit(1)
 
 row = rows[0]
-print(f"STATUS: {row['status']} PAYMENT: {row['payment_state']} REF: {row.get('payment_ref')}", file=sys.stderr)
+_ref = str(row.get("payment_ref") or "")
+# NEVER print a payment reference into a log (Ox 2026-11-08). This workflow runs on a PUBLIC repo and
+# the run log is world-readable: run 42504704040 at 17:23Z printed REF: 4694831192117582167 and the full
+# upload URL with a live capability token. Presence + last 4 is enough for an operator to match a row.
+_ref_masked = ("present ****" + _ref[-4:]) if _ref else "absent"
+print(f"STATUS: {row['status']} PAYMENT: {row['payment_state']} REF: {_ref_masked}", file=sys.stderr)
 
 # Generate fresh token (32 random bytes -> 43-char base64url)
 token_bytes = secrets.token_bytes(32)
