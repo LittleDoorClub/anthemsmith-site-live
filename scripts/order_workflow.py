@@ -19,6 +19,7 @@ import urllib.request
 ORIGIN = "https://veqpmdsiqcjjpxgcubrp.supabase.co"
 ORDER_TABLE = "anthemsmith_recovery_orders"
 UPLOAD_TABLE = "anthemsmith_recovery_uploads"
+ANALYSIS_TABLE = "anthemsmith_recovery_analyses"
 ORDER_PATTERN = r"AS-[A-Za-z0-9_-]{1,90}"
 PUBLIC_SUFFIXES = (".json", ".blocked.json", ".failed.json", ".delivery.json")
 import private_audio as pa
@@ -141,6 +142,18 @@ def canonical_order(oid, read=rest):
         paths.append(path)
     if len(set(paths)) != len(paths) or total_bytes > 50 * 1024 * 1024:
         raise GateError("invalid_private_photo_manifest")
+    # ENFORCER LAW (2026-11-10): prepare() HARD-FAILS any order whose
+    # vision-analysis rows are absent, keyed by the exact uploaded object and
+    # its source sha. A photo order never proceeds on captions/bio: the
+    # caption-only degradation is deleted, not flagged (AS-TEST-MAYA-20261110
+    # shipped a sales caption as its chorus when vision never ran).
+    analyses = read(ANALYSIS_TABLE, {"order_id": "eq." + oid,
+        "select": "order_id,object_path,source_sha256", "limit": "11"})
+    analysed = {(item.get("object_path"), str(item.get("source_sha256")))
+                for item in analyses if item.get("order_id") == oid}
+    uploaded = {(item.get("object_path"), str(item.get("sha256"))) for item in uploads}
+    if not analysed or not uploaded or not uploaded.issubset(analysed):
+        raise GateError("vision_analysis_missing")
     email, phone = string_field(delivery, "email", 320), string_field(delivery, "sms_to", 20)
     email_valid = bool(email and re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email))
     phone_valid = bool(phone and re.fullmatch(r"\+[1-9]\d{7,14}", phone))

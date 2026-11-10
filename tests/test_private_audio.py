@@ -257,6 +257,8 @@ class AudioTests(unittest.TestCase):
         import grounded_lyrics
         (self.root/'scripts').mkdir()
         shutil.copyfile(ROOT/'scripts'/'forge_order.py', self.root/'scripts'/'forge_order.py')
+        # CHORUS LAW lives in its own module now; the copied forge imports it.
+        shutil.copyfile(ROOT/'scripts'/'anchor_law.py', self.root/'scripts'/'anchor_law.py')
         order = {**self.store.order(), 'paid_status': 'paid_verified', 'intake': 'photos',
                  'details': 'Synthetic source-backed fixture', 'photo_urls': [OID+'/11111111-1111-4111-8111-111111111111.png']}
         photo = SimpleNamespace(descriptions=['a painted circle'], ocr_texts=[], storage_paths=order['photo_urls'],

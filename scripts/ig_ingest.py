@@ -422,15 +422,24 @@ def pick_anchor(captions, alt_lines, details, handle=None):
     Returns (anchor, source_ref) and (None, None) when nothing qualifies.
     NEVER synthesises a fallback string -- that is the F1 defect.
     """
-    for c in captions or []:
-        if line_ok(c):
-            return c.strip(), "ig-caption"
-    for a in alt_lines or []:
-        if line_ok(a):
-            return a.strip(), "ig-alt"
-    for part in re.split(r"[\n.]+", details or ""):
-        if line_ok(part):
-            return part.strip(), "brief"
+    # CHORUS LAW (Gabe via Anthemist lane, 2026-11-10): captions rank by story
+    # weight (first-person, past-tense, life event). Product/CTA captions are
+    # INELIGIBLE as anchors -- the specimen sang a launch caption while the
+    # human sentence sat unused. anchor_law.pick() does the ranking; line_ok()
+    # still rejects wrappers, hashtag dumps and Meta pixel captions first.
+    import anchor_law
+    caption_lines = [c for c in (captions or []) if line_ok(c)]
+    line, source = anchor_law.pick(caption_lines, "ig-caption")
+    if line:
+        return line, source
+    alt_ok = [a for a in (alt_lines or []) if line_ok(a)]
+    line, source = anchor_law.pick(alt_ok, "ig-alt")
+    if line:
+        return line, source
+    brief_lines = [part for part in re.split(r"[\n.]+", details or "") if line_ok(part)]
+    line, source = anchor_law.pick(brief_lines, "brief")
+    if line:
+        return line, source
     return None, None
 
 

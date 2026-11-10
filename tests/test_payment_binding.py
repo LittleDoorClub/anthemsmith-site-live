@@ -13,12 +13,29 @@ class BindingTests(unittest.TestCase):
              'delivery':{'mode':'sms','sms_to':'+12025550123','email':'','consent_verified':False},'delivery_result':{}}
         upload={'order_id':OID,'status':'ready','object_path':OID+'/12345678-1234-4123-8123-123456789abc.png',
                 'byte_size':100,'mime_type':'image/png','sha256':'a'*64}
+        analysis={'order_id':OID,'object_path':upload['object_path'],'source_sha256':upload['sha256']}
         def read(table, params):
             if 'payment_ref' in params:return [{'order_id':OID}]
+            if table==w.ANALYSIS_TABLE:return [analysis]
             return [row] if table==w.ORDER_TABLE else [upload]
         result=w.canonical_order(OID,read)
         self.assertEqual(result['paid_status'],'paid_verified')
         self.assertFalse(result['consent_verified'])
+
+    def test_missing_vision_analysis_is_blocked_before_generation(self):
+        # ENFORCER LAW 2026-11-10: a photo order with no vision-analysis rows
+        # must hard-fail in prepare(); captions are not a degradation path.
+        row={'order_id':OID,'status':'source_received','payment_state':'verified_paid','payment_ref':'venmo:fixture',
+             'brief':{'intake':'photos','category':'My Story','voice':'female','mood':'Life journey'},
+             'delivery':{'mode':'sms','sms_to':'+120****0123','email':'','consent_verified':False},'delivery_result':{}}
+        upload={'order_id':OID,'status':'ready','object_path':OID+'/12345678-1234-4123-8123-123456789abc.png',
+                'byte_size':100,'mime_type':'image/png','sha256':'a'*64}
+        def read(table, params):
+            if 'payment_ref' in params:return [{'order_id':OID}]
+            if table==w.ANALYSIS_TABLE:return []
+            return [row] if table==w.ORDER_TABLE else [upload]
+        with self.assertRaisesRegex(w.GateError,'vision_analysis_missing'):
+            w.canonical_order(OID,read)
 
     def test_reused_reference_is_blocked_before_upload_or_generation(self):
         row={'order_id':OID,'status':'source_received','payment_state':'verified_paid','payment_ref':'venmo:fixture'}

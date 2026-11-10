@@ -5,6 +5,7 @@ Writes songs/<order_id>.mp3 (30s hook) + songs/<order_id>-full.mp3 + songs/<orde
 Anti-hallucination: only text visible on the public profile (bio + recent captions) is used;
 unknown facts stay null. No logged-in access anywhere."""
 import json, os, re, sys, time, hashlib, subprocess, urllib.request
+import anchor_law  # CHORUS LAW: story-weight anchors, mechanical chorus lock
 
 PRIVATE_RECOVERY = os.environ.get("AS_PRIVATE_RECOVERY") == "1"
 if PRIVATE_RECOVERY:
@@ -102,6 +103,14 @@ if PHOTO_URLS:
     photo_storage_paths, photo_analysis = result.storage_paths, result.analysis
     vision_raw = [item["result"] for item in photo_analysis]
     print(f"PHOTO INTAKE: {len(photo_analysis)} durable photos analyzed", flush=True)
+
+# ENFORCER LAW (2026-11-10): a photo order whose vision-analysis rows are
+# absent must HARD-FAIL here. The caption-only degradation is deleted, not
+# flagged -- order AS-TEST-MAYA-20261110 shipped a sales caption as its
+# chorus because the forge silently carried on without vision.
+if INTAKE in ("photos", "screenshot") and not photo_analysis:
+    die("vision_analysis_missing: no vision-analysis rows for this order "
+        "(photo_intake never ran; caption-only fallback is not a path)")
 
 # ---------- 1. INGEST (public profile only) ----------
 def fetch(url, timeout=25):
@@ -429,9 +438,11 @@ if "hip" in corpus or "gym" in corpus: style = band["My Story"]
 # (the old code shipped f"{name} is one of the real ones" and follower-count
 # lines as the customer's chorus -- an invented line with zero sources).
 if photo_descriptions:
-    # Photo intake: DETAILS text is the customer's own words = verbatim source
+    # Photo intake: DETAILS text is the customer's own words = verbatim source.
+    # CHORUS LAW: rank its sentences by story weight; a product/CTA sentence is
+    # ineligible. The anchor is ONE human line, never the whole caption blob.
     if DETAILS:
-        anchor, anchor_src = DETAILS.strip(), "brief"
+        anchor, anchor_src = anchor_law.pick([DETAILS], "brief")
     elif photo_descriptions:
         # A grounded visual observation is not a verbatim customer quotation.
         anchor = photo_analysis[0]["result"]["observations"][0].strip()
@@ -440,12 +451,19 @@ if photo_descriptions:
         anchor, anchor_src = None, None
 elif ig_ingest is not None:
     anchor, anchor_src = ig_ingest.pick_anchor(captions, alt_lines, DETAILS, handle)
-elif captions:
-    anchor, anchor_src = captions[0].strip(), "ig-caption"
+elif captions and INTAKE not in ("photos", "screenshot"):
+    anchor, anchor_src = anchor_law.pick(captions, "ig-caption")
 elif DETAILS:
     # file-intake orders: the customer's own brief words ARE verbatim source
-    anchor, anchor_src = DETAILS.strip(), "brief"
+    anchor, anchor_src = anchor_law.pick([DETAILS], "brief")
 else:
+    anchor, anchor_src = None, None
+
+# CHORUS LAW lock: the chorus is the anchor's first NON-PROMOTIONAL sentence,
+# verbatim, after hashtags/URLs/@handles/CTAs/price+shipping lines are stripped.
+# An anchor with no singable human sentence is no anchor at all -> ship gate.
+chorus_line = anchor_law.chorus(anchor) if anchor else None
+if anchor and not chorus_line:
     anchor, anchor_src = None, None
 
 # ---------- 4b. SHIP GATE -- no heart anchor, no ship (house law) ----------
@@ -502,8 +520,9 @@ else:
     v1 = clean(f"They say {name} keeps it real, ask the regulars how it feels," if name else "Some folks just carry the room, from the first hello to the last song,")
     v2 = clean(corpus[:160]) if corpus else "Every detail says the same thing, the real ones know it's true,"
     pre = "And when the moment came, they didn't even flinch,"
-    chorus = clean(f"{anchor} — that's the whole story, that's the anthem right here," if anchor
-                   else "Say it plain, say it loud, this one's yours and it's true,")
+    # CHORUS LAW: verbatim anchor sentence, no banned-word rewrite (clean() would
+    # alter the customer's own words and break the word-for-word QC diff).
+    chorus = chorus_line if chorus_line else "Say it plain, say it loud, this one's yours and it's true,"
     chorus2 = clean(f"Put it on the speaker, let the whole block hear, {name}, this one's yours,")
 
     lyrics = f"""[Verse 1]
