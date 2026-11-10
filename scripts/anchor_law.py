@@ -65,6 +65,11 @@ def strip_noise(text):
     # collapsing them merged a stripped CTA tail into the NEXT caption
     # ("Shop now at I created my job..." — measured in the lane selftest).
     text = re.sub(r"[ \t]+", " ", text)
+    # Mechanical punctuation hygiene: a separator-joined blob can leave "it..";
+    # collapse doubled terminal punctuation and stray space-before-punctuation.
+    # Words are never altered -- the chorus stays verbatim.
+    text = re.sub(r"\s+([,.!?;:])", r"\1", text)
+    text = re.sub(r"([.!?])\1+", r"\1", text)
     lines = [line.strip(" \t-–—|·") for line in text.splitlines()]
     return "\n".join(line for line in lines if line)
 
