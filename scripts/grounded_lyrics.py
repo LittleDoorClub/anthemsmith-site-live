@@ -134,6 +134,21 @@ def _evidence(analysis, brief):
     return result
 
 
+def _shape(composition):
+    """Measure a rejected draft so the repair note can say what was actually wrong.
+
+    Best effort on purpose: a malformed draft must still produce a note, not a traceback.
+    """
+    try:
+        lines = [line["text"] for section in composition["sections"]
+                 for line in section["lines"] if isinstance(line.get("text"), str)]
+    except (AttributeError, KeyError, TypeError):
+        return ""
+    return " (%d sections, %d lines, %d words)" % (
+        len(composition["sections"]), len(lines),
+        sum(len(re.findall(r"\b[\w’'-]+\b", text)) for text in lines))
+
+
 def _validate_composition(result, source_ids, photo_ids):
     try:
         if set(result) != {"title", "sections"}:
@@ -219,8 +234,9 @@ def compose_photo_lyrics(analysis, brief, category, mood, voice, api_key, http=_
         "Humor must come from observed details, not invented mishaps or insults about appearance. "
         "Respect mood/voice as preferences only, within this contract. "
         "Use exactly six sections in this order: Verse 1, Chorus, Verse 2, Chorus, Bridge, "
-        "Final Chorus. Each section has 4–8 lyric lines, total 220–520 words, under 6000 "
-        "characters. Aim for a 3–4 minute song arrangement. Make the chorus memorable, with "
+        "Final Chorus. Each section has 4–8 lyric lines of 8–16 words each, so the whole "
+        "song lands inside 220–520 words and under 6000 characters; six sections of six "
+        "such lines is the safe target. Aim for a 3–4 minute song arrangement. Make the chorus memorable, with "
         "a concrete recurring hook. Each line must cite one or more exact source_ids that "
         "support it. Return the required JSON only; no source citations inside sung text."
     )
@@ -237,9 +253,11 @@ def compose_photo_lyrics(analysis, brief, category, mood, voice, api_key, http=_
         # One bounded repair, re-judged by the same strict validator. A model that drifts on
         # a formatting rule (six sections, line counts, 220-520 words, every photo cited)
         # must not dead-end a paid order -- and the validator is never loosened to help it.
+        # The note carries the measured shape: "song_length" alone leaves a model guessing
+        # whether it wrote too few or too many words.
         composition, composition_id = compose(
             " Your previous answer was rejected by the validator with code "
-            + str(error).split(":", 1)[-1]
+            + str(error).split(":", 1)[-1] + _shape(composition)
             + ". Return a corrected composition that satisfies every constraint exactly.")
         lyrics, lines, word_count = _validate_composition(composition, source_ids, photo_ids)
     review_instructions = (

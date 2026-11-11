@@ -79,6 +79,13 @@ class OneBoundedRepair(unittest.TestCase):
         self.assertEqual(result.title, "Red Mug Morning")
         self.assertEqual(len(self.prompts), 3)
         self.assertIn("rejected by the validator with code structure", self.prompts[1])
+        # A bare code leaves the model guessing; the note must carry what it actually wrote.
+        self.assertIn("(5 sections, 20 lines,", self.prompts[1])
+        self.assertIn("words)", self.prompts[1])
+
+    def test_junk_draft_still_yields_a_note(self):
+        self.assertEqual(gl._shape("nonsense"), "")
+        self.assertEqual(gl._shape({"sections": [{"lines": "no"}]}), "")
 
     def test_second_rejection_blocks(self):
         with self.assertRaises(gl.GroundedLyricsError) as caught:
