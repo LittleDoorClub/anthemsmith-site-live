@@ -154,11 +154,14 @@ class OneBoundedRepair(unittest.TestCase):
     def test_repair_still_refused_holds(self):
         bodies = [composition(), self.reviews({(2, 3)}),
                   composition(), self.reviews({(2, 3)}),
+                  self.repair("s2-l3"), self.partial({(2, 3)}),
                   self.repair("s2-l3"), self.partial({(2, 3)})]
         with self.assertRaises(gl.GroundedLyricsError) as caught:
             gl.compose_photo_lyrics(PHOTO, "", "", "", "", "test-key", self.http(bodies))
         self.assertTrue(str(caught.exception).endswith(":unsupported_or_uncertain_1"), caught.exception)
-        self.assertEqual(len(self.prompts), 6)
+        self.assertEqual(len(self.prompts), 8)
+        # Pass 2 abandons metaphor: a refused line must become a visible detail, not a feeling.
+        self.assertIn("literal description", self.prompts[6])
 
     def test_repair_must_cover_every_refused_line(self):
         with self.assertRaises(gl.GroundedLyricsError) as caught:

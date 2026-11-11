@@ -377,16 +377,30 @@ def compose_photo_lyrics(analysis, brief, category, mood, voice, api_key, http=_
         rejected = _rejected_lines(review, lines)
         if not rejected:
             return result(composition, lyrics, lines, word_count, composition_id, review_id)
-        if attempt == 2:
-            # A whole-song rewrite already failed to clear the reviewer. Now replace ONLY the
-            # refused lines -- each gets its own targeted answer -- and re-review just those,
-            # so a fresh draft cannot smuggle a new unsupported line past the gate.
+        if attempt == 1:
+            # Name the refused lines by id -- never their text -- and keep the structure fixed,
+            # so the rewrite cannot restructure its way out of the grounding gate.
+            note = (" The grounding reviewer marked these line_ids unsupported or uncertain: "
+                    + ", ".join(rejected[:8])
+                    + ". Rewrite each so every claim is visible in its cited evidence, keep the "
+                      "same section names and the same number of lines per section, and return "
+                      "the whole composition JSON.")
+            continue
+        # A whole-song rewrite already failed to clear the reviewer. Now replace ONLY the
+        # refused lines and re-review just those, so a fresh draft cannot smuggle a new
+        # unsupported line past the gate. Pass 2 drops metaphor entirely: a second failure is
+        # almost always a line that asserts a feeling instead of a visible detail.
+        for pass_no in (1, 2):
             wanted = [line for line in lines if line["line_id"] in rejected]
             repair, _ = _call(api_key,
                 "Replace ONLY the supplied lines. Return each line_id with new text whose "
-                "every claim is visible in its cited evidence, seven to fourteen words, and "
-                "the same source_ids unless the evidence requires another cited source. "
-                "Return JSON with a replacements array only.",
+                + ("every claim is visible in its cited evidence, seven to fourteen words, and "
+                   "the same source_ids unless the evidence requires another cited source. "
+                   if pass_no == 1 else
+                   "content is a literal description of a detail visible in the cited evidence "
+                   "-- no metaphor, no feeling, no biography -- seven to fourteen words, same "
+                   "source_ids. ")
+                + "Return JSON with a replacements array only.",
                 {"evidence": evidence, "title": composition["title"], "lines": wanted},
                 REPAIR_SCHEMA, "grounded_line_repair", 0.4, http)
             _apply_replacements(composition, repair, rejected)
@@ -394,16 +408,10 @@ def compose_photo_lyrics(analysis, brief, category, mood, voice, api_key, http=_
             again = [line for line in lines if line["line_id"] in rejected]
             partial, review_id = review_of(composition["title"], again)
             still = _rejected_lines(partial, again)
-            if still:
-                raise GroundedLyricsError(
-                    "lyrics_grounding_rejected:unsupported_or_uncertain_%d" % len(still))
-            return result(composition, lyrics, lines, word_count, composition_id, review_id,
-                          scope="replaced_lines:%d" % len(rejected))
-        # Name the refused lines by id -- never their text -- and keep the structure fixed, so
-        # the rewrite cannot use the repair to restructure its way out of the grounding gate.
-        note = (" The grounding reviewer marked these line_ids unsupported or uncertain: "
-                + ", ".join(rejected[:8])
-                + ". Rewrite each so every claim is visible in its cited evidence, keep the same "
-                  "section names and the same number of lines per section, and return the whole "
-                  "composition JSON.")
+            if not still:
+                return result(composition, lyrics, lines, word_count, composition_id, review_id,
+                              scope="replaced_lines:%d" % len(rejected))
+            rejected = still
+        raise GroundedLyricsError(
+            "lyrics_grounding_rejected:unsupported_or_uncertain_%d" % len(rejected))
     raise GroundedLyricsError("lyrics_grounding_rejected:no_composition")
