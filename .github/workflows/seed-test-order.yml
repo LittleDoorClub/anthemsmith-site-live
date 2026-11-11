@@ -16,7 +16,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Seed the canonical test order
+      - name: Install image decoder
+        run: python -m pip install Pillow --quiet
+      # The order gate hard-fails without the vision rows and the table that holds
+      # them never existed (404 private_order_store_unavailable, three dispatches).
+      # Service-role is the only DDL hand in this house; safe-deploy is its door.
+      - name: Ensure the private analysis store exists
         env:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python scripts/ensure_analysis_table.py
+      - name: Seed the canonical test order (uploads + vision rows)
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: python scripts/seed_test_order.py
