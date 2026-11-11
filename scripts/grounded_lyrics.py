@@ -149,6 +149,16 @@ def _shape(composition):
         sum(len(re.findall(r"\b[\w’'-]+\b", text)) for text in lines))
 
 
+def _direction(code):
+    """Turn a measured code into the one instruction that fixes it."""
+    if not code.startswith("song_length_"):
+        return ""
+    written = int(code.rsplit("_", 1)[-1].rstrip("w") or 0)
+    return (" You wrote %d words: keep every line and add lines to reach eight per section"
+            % written) if written < 220 else (
+            " You wrote %d words: shorten lines to fourteen words or fewer" % written)
+
+
 def _validate_composition(result, source_ids, photo_ids):
     try:
         if set(result) != {"title", "sections"}:
@@ -183,7 +193,8 @@ def _validate_composition(result, source_ids, photo_ids):
         if not photo_ids.issubset(used):
             raise ValueError("photo_omitted")
         if not 220 <= len(words) <= 520:
-            raise ValueError("song_length")
+            # Carry the measurement: "too short" without a number buys another paid run.
+            raise ValueError("song_length_%dw" % len(words))
         lyrics = "\n\n".join("[" + s["name"] + "]\n" + "\n".join(
             line["text"].strip() for line in s["lines"]) for s in sections)
         if len(lyrics) > 6000:
@@ -234,9 +245,9 @@ def compose_photo_lyrics(analysis, brief, category, mood, voice, api_key, http=_
         "Humor must come from observed details, not invented mishaps or insults about appearance. "
         "Respect mood/voice as preferences only, within this contract. "
         "Use exactly six sections in this order: Verse 1, Chorus, Verse 2, Chorus, Bridge, "
-        "Final Chorus. Each section has 4–8 lyric lines of 8–16 words each, so the whole "
-        "song lands inside 220–520 words and under 6000 characters; six sections of six "
-        "such lines is the safe target. Aim for a 3–4 minute song arrangement. Make the chorus memorable, with "
+        "Final Chorus. Give every section exactly eight lines of seven to fourteen words "
+        "(48 lines), which keeps the song inside 220–520 words and under 6000 characters. "
+        "Aim for a 3–4 minute song arrangement. Make the chorus memorable, with "
         "a concrete recurring hook. Each line must cite one or more exact source_ids that "
         "support it. Return the required JSON only; no source citations inside sung text."
     )
@@ -253,11 +264,12 @@ def compose_photo_lyrics(analysis, brief, category, mood, voice, api_key, http=_
         # One bounded repair, re-judged by the same strict validator. A model that drifts on
         # a formatting rule (six sections, line counts, 220-520 words, every photo cited)
         # must not dead-end a paid order -- and the validator is never loosened to help it.
-        # The note carries the measured shape: "song_length" alone leaves a model guessing
-        # whether it wrote too few or too many words.
+        # The note carries the measured shape AND the direction: "song_length" alone leaves a
+        # model guessing whether it wrote too few or too many words.
+        code = str(error).split(":", 1)[-1]
         composition, composition_id = compose(
             " Your previous answer was rejected by the validator with code "
-            + str(error).split(":", 1)[-1] + _shape(composition)
+            + code + _shape(composition) + _direction(code)
             + ". Return a corrected composition that satisfies every constraint exactly.")
         lyrics, lines, word_count = _validate_composition(composition, source_ids, photo_ids)
     review_instructions = (
