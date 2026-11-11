@@ -90,9 +90,14 @@ def rest(table, params):
                 raise ValueError("too large")
             rows = json.loads(raw)
         if not isinstance(rows, list):
+            print("store_error not_rows %s" % type(rows).__name__, flush=True)
             raise ValueError("not rows")
         return rows
-    except Exception:
+    except GateError:
+        raise
+    except Exception as exc:
+        # Class/code/table only — never user data or provider bodies.
+        print("store_error %s code=%s table=%s" % (type(exc).__name__, getattr(exc, "code", ""), table), flush=True)
         raise GateError("private_order_store_unavailable") from None
 
 
