@@ -163,6 +163,14 @@ class OneBoundedRepair(unittest.TestCase):
         # Pass 2 abandons metaphor: a refused line must become a visible detail, not a feeling.
         self.assertIn("literal description", self.prompts[6])
 
+    def test_partial_review_ignores_its_title_verdict(self):
+        partial = {"title_supported": False, "source_instructions_followed": False,
+                   "reviews": [{"line_id": "s2-l3", "verdict": "supported"}]}
+        self.assertEqual(gl._rejected_lines(partial, [{"line_id": "s2-l3"}], check_title=False), [])
+        # A full review still treats an unsupported title as fatal.
+        with self.assertRaises(gl.GroundedLyricsError):
+            gl._rejected_lines(partial, [{"line_id": "s2-l3"}])
+
     def test_repair_must_cover_every_refused_line(self):
         with self.assertRaises(gl.GroundedLyricsError) as caught:
             gl._apply_replacements(composition(), {"replacements": []}, {"s2-l3"})

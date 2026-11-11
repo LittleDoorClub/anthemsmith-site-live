@@ -153,17 +153,22 @@ def _shape(composition):
         sum(len(re.findall(r"\b[\w’'-]+\b", text)) for text in lines))
 
 
-def _rejected_lines(review, lines):
+def _rejected_lines(review, lines, check_title=True):
     """Validate the review envelope, then return the line_ids it refused.
 
     Ids only: the reviewer's reasons and the lyric text stay out of every message and log.
     A broken envelope or a failed title/injection verdict raises rather than being repaired --
     those are safety signals, not formatting drift a rewrite should be talked out of.
+
+    ``check_title=False`` is for a re-review of replacement lines: the title is not part of
+    that payload, so its verdict there is out of scope -- the full review already ruled on it
+    (a partial review that came back title-unsupported blocked run 43073092053 for nothing).
     """
     try:
         if set(review) != {"title_supported", "source_instructions_followed", "reviews"}:
             raise ValueError("review_schema")
-        if review["title_supported"] is not True or review["source_instructions_followed"] is not False:
+        if (review["title_supported"] is not True and check_title) or \
+                review["source_instructions_followed"] is not False:
             raise ValueError("title_or_injection")
         expected = {line["line_id"] for line in lines}
         reviewed = review["reviews"]
@@ -407,7 +412,7 @@ def compose_photo_lyrics(analysis, brief, category, mood, voice, api_key, http=_
             lyrics, lines, word_count = _validate_composition(composition, source_ids, photo_ids)
             again = [line for line in lines if line["line_id"] in rejected]
             partial, review_id = review_of(composition["title"], again)
-            still = _rejected_lines(partial, again)
+            still = _rejected_lines(partial, again, check_title=False)
             if not still:
                 return result(composition, lyrics, lines, word_count, composition_id, review_id,
                               scope="replaced_lines:%d" % len(rejected))
