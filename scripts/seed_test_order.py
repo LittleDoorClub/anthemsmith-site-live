@@ -60,6 +60,23 @@ def req(url, data=None, method="GET", ctype="application/json", extra=None):
         return e.code, e.read()
 
 
+def analyses_cover(uploads, analyses):
+    """Mirror order_workflow.prepare()'s gate: every ready upload has a row for
+    its exact object AND its exact source sha. Path match alone is not coverage."""
+    need = {(u.get("object_path"), str(u.get("sha256"))) for u in uploads}
+    have = {(a.get("object_path"), str(a.get("source_sha256"))) for a in analyses}
+    return bool(need) and need.issubset(have)
+
+
+def analyses_rows():
+    """The gate's own read: no analysis body is fetched or printed by the seed."""
+    st, rows = req(ORIGIN + "/rest/v1/anthemsmith_recovery_analyses?order_id=eq." + OID +
+                   "&select=object_path,source_sha256,model")
+    if st != 200 or not isinstance(rows, list):
+        return None
+    return rows
+
+
 def main():
     if not KEY:
         fail("no_service_key")
@@ -146,8 +163,33 @@ def main():
     total = sum(u["byte_size"] for u in ups) if st == 200 else -1
     if st != 200 or len(ups) != 3 or total > 50_000_000:
         fail("final_readback")
+
+    # 4 — vision analysis rows. order_workflow.prepare() HARD-FAILS the order
+    # without them (vision_analysis_missing) and, while the table was missing,
+    # died one step earlier at private_order_store_unavailable. Same engine and
+    # same persist path as paid intake; read first so a re-run of a complete
+    # seed spends nothing.
+    rows = analyses_rows()
+    if rows is None:
+        fail("analyses_unreadable")
+    if not analyses_cover(ups, rows):
+        sys.path.insert(0, str(HERE))
+        from photo_intake import PhotoIntakeError, inspect_private_sources
+        api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+        try:
+            inspect_private_sources([u["object_path"] for u in ups], OID, ORIGIN, KEY, api_key)
+        except PhotoIntakeError as exc:
+            fail("vision_" + str(exc))
+        except Exception:
+            fail("vision_unavailable")
+        rows = analyses_rows()
+    if rows is None or not analyses_cover(ups, rows):
+        fail("analysis_readback_incomplete")
+    if any(not isinstance(r.get("model"), str) or not r["model"] for r in rows):
+        fail("analysis_model_missing")
+
     print(json.dumps({"seed": "OK", "order_id": OID, "uploads_ready": len(ups),
-                      "total_bytes": total}))
+                      "analyses_ready": len(rows), "total_bytes": total}))
     print("NEXT (separate dispatch, same hand): anthemsmith-order.yml "
           "workflow_dispatch with inputs.order_id=" + OID)
 
