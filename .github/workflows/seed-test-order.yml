@@ -1,0 +1,22 @@
+name: seed-test-order
+# The seed hand for AS-TEST-MAYA-20261110 — runs scripts/seed_test_order.py
+# inside the Actions env, the one place SUPABASE_SERVICE_ROLE_KEY lives.
+# Written by the Anthemist lane 2026-11-10 (filing 16 is the spec).
+# Repo paths in the push batch: this file -> .github/workflows/seed-test-order.yml
+#   scripts-generalised/seed_test_order.py -> scripts/seed_test_order.py
+#   scripts-generalised/seed_details.txt   -> scripts/seed_details.txt
+#   seed-assets/*.jpg                      -> seed-assets/*.jpg (remove after the run)
+on:
+  workflow_dispatch: {}
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Seed the canonical test order
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python scripts/seed_test_order.py
