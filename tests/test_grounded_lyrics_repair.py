@@ -48,6 +48,19 @@ class ValidatorNamesTheRule(unittest.TestCase):
             gl._validate_composition(bad, {"photo-01"}, {"photo-01"})
         self.assertTrue(str(caught.exception).endswith(":line_length"), caught.exception)
 
+    def test_short_song_carries_its_own_measurement(self):
+        thin = composition()
+        for section in thin["sections"]:
+            section["lines"] = [{"text": "aaaaaa", "source_ids": ["photo-01"]} for _ in range(4)]
+        with self.assertRaises(gl.GroundedLyricsError) as caught:
+            gl._validate_composition(thin, {"photo-01"}, {"photo-01"})
+        self.assertTrue(str(caught.exception).endswith(":song_length_24w"), caught.exception)
+
+    def test_direction_names_the_fix(self):
+        self.assertIn("add lines", gl._direction("song_length_198w"))
+        self.assertIn("shorten", gl._direction("song_length_600w"))
+        self.assertEqual(gl._direction("structure"), "")
+
     def test_uncited_photo_names_the_constraint(self):
         with self.assertRaises(gl.GroundedLyricsError) as caught:
             gl._validate_composition(composition(), {"photo-01"}, {"photo-02"})
