@@ -1,5 +1,5 @@
 {
   "order_id": "AS-TEST-MAYA-20261110",
   "status": "blocked",
-  "reason": "canonical_order_missing"
+  "reason": "private_order_store_unavailable"
 }
