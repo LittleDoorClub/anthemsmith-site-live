@@ -1,4 +1,4 @@
-"""Pin the seed's analysis coverage check and the DDL contract, offline.
+"""Pin the seed's analysis coverage check and the private-store DDL contract, offline.
 
 order_workflow.prepare() reads (object_path, source_sha256) rows and refuses the
 order unless every ready upload's exact pair is present. A seed that matched on
@@ -14,7 +14,7 @@ from pathlib import Path
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-import ensure_analysis_table as ensure  # noqa: E402  (import after the path insert)
+import ensure_private_store as ensure  # noqa: E402  (import after the path insert)
 import seed_test_order as seed  # noqa: E402
 
 SHA_A = "a" * 64
@@ -47,29 +47,46 @@ class AnalysisCoverage(unittest.TestCase):
 
 
 class TableContract(unittest.TestCase):
-    def statements(self):
-        return {label: statement for label, statement, _ in ensure.STATEMENTS}
+    # The writer's on_conflict target per table. A CREATE whose UNIQUE differs from this
+    # turns every vision/composition write into a duplicate-key failure, so it is pinned.
+    CONFLICT = {
+        "anthemsmith_recovery_analyses": "UNIQUE (order_id, object_path, source_sha256, model)",
+        "anthemsmith_recovery_compositions": "UNIQUE (order_id, source_digest, model)",
+    }
+    COLUMNS = {
+        "anthemsmith_recovery_analyses": ("order_id", "object_path", "source_sha256", "model",
+                                          "provider_request_id", "analysis", "created_at"),
+        "anthemsmith_recovery_compositions": ("order_id", "source_digest", "title", "lyrics",
+                                              "provenance", "model", "created_at"),
+    }
+
+    def statements(self, table):
+        return {label: statement for label, statement, _ in ensure.statements(table, ensure.TABLES[table][1])}
+
+    def test_both_tables_are_created(self):
+        self.assertEqual(set(ensure.TABLES), set(self.CONFLICT))
 
     def test_conflict_target_is_the_unique_constraint(self):
-        create = " ".join(self.statements()["create"].split())
-        self.assertIn("UNIQUE (order_id, object_path, source_sha256, model)", create)
-        self.assertIn("IF NOT EXISTS", create)
+        for table, unique in self.CONFLICT.items():
+            create = " ".join(self.statements(table)["create"].split())
+            self.assertIn(unique, create, table)
+            self.assertIn("IF NOT EXISTS", create)
 
     def test_writer_and_gate_columns_exist(self):
-        create = self.statements()["create"]
-        for column in ("order_id", "object_path", "source_sha256", "model",
-                       "provider_request_id", "analysis", "created_at"):
-            self.assertIn(column, create)
+        for table, columns in self.COLUMNS.items():
+            create = self.statements(table)["create"]
+            for column in columns:
+                self.assertIn(column, create, (table, column))
 
     def test_every_statement_carries_a_boolean_verify(self):
-        for label, _, verify in ensure.STATEMENTS:
-            self.assertTrue(verify.lstrip().upper().startswith("SELECT"), label)
+        for table in self.CONFLICT:
+            for label, _, verify in ensure.statements(table, ensure.TABLES[table][1]):
+                self.assertTrue(verify.lstrip().upper().startswith("SELECT"), (table, label))
 
     def test_store_is_private(self):
-        labels = [label for label, _, _ in ensure.STATEMENTS]
-        self.assertIn("rls", labels)
-        self.assertIn("revoke_public", labels)
-        self.assertIn("grant_service_role", labels)
+        for table in self.CONFLICT:
+            labels = [label for label, _, _ in ensure.statements(table, ensure.TABLES[table][1])]
+            self.assertEqual(labels, ["create", "rls", "revoke_public", "grant_service_role"])
 
 
 if __name__ == "__main__":
