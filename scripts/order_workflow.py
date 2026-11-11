@@ -66,6 +66,37 @@ def record_blocked(root, oid, reason):
     })
 
 
+CHILD_CODE = re.compile(r"[a-z][a-z0-9_]*(?:: [a-z][a-z0-9_]*)?\Z")
+
+
+def child_failure_code(stage, oid):
+    """Lift the worker's failure CODE so a hold is diagnosable without leaking source.
+
+    forge_order.py dies with a short code (``photo_intake: source_files_missing``) into
+    its own stage; its prose can quote customer material, so only a code-shaped token
+    survives this door and free text never reaches a published blocked record.
+    """
+    try:
+        reason = json.loads((stage / "songs" / f"{oid}.failed.json").read_text())["reason"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return ""
+    return reason if isinstance(reason, str) and CHILD_CODE.match(reason) else ""
+
+
+def generation_action(job):
+    """Route a private audio job without ever guessing about a possible side effect.
+
+    ``submitted`` is the only state a poll may resume. ``preflight_failed`` is the
+    CAS-confirmed proof that no music POST happened, so it may reserve again -- without
+    this branch a confirmed preflight exit dead-ends forever behind a resume that can
+    only fail. Any other status may hide an accepted request and must reconcile.
+    """
+    status = (job or {}).get("status")
+    if status == "submitted":
+        return "resume"
+    return "reserve" if status in (None, "preflight_failed") else "reconcile"
+
+
 class NoStoreRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
         raise GateError("private_store_redirect_refused")
@@ -294,7 +325,10 @@ def forge(root, run=subprocess.run):
             job = row['delivery'].get('private_audio_job')
             if not full.exists():
                 pa.output_hosts()  # Fail before spend when download hosts are unreviewed.
-                if job and job.get('status') != 'preflight_failed':
+                action = generation_action(job)
+                if action == 'reconcile':
+                    raise GateError('generation_reconciliation_required')
+                if action == 'resume':
                     pa.resume_generation(oid, full)  # GET/poll only; never submit again.
                 else:
                     # Revalidate canonical source/payment immediately before reserving spend.
@@ -310,7 +344,8 @@ def forge(root, run=subprocess.run):
                         if current == job and current.get('status') == 'reserved':
                             # Confirmed child exit, no submitting CAS: safe preflight retry.
                             pa.job_transition(oid, job, {**job, 'status': 'preflight_failed'})
-                        raise GateError('forge_failed_or_audio_incomplete')
+                        code = child_failure_code(stage, oid)
+                        raise GateError('forge_failed_or_audio_incomplete' + (':' + code if code else ''))
             elif not job:
                 raise GateError('unbound_staged_audio_reconciliation_required')
             manifest, context = pa.register_audio(oid, full)
