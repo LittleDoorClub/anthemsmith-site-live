@@ -120,8 +120,11 @@ def probe(table, columns):
             code = json.loads(raw).get("code")
         except Exception:
             code = None
-        if exc.code == 404 and code == "42P01":
-            return ("missing", "42P01")
+        # PostgREST says 42P01 when Postgres answers and PGRST205 when its own schema cache
+        # has never seen the table; both mean "not created yet", and only one of them is a
+        # Postgres code. Treating PGRST205 as an error cost a dispatch (run 43071533364).
+        if exc.code == 404 and (code in ("42P01", "PGRST205") or "schema cache" in raw):
+            return ("missing", code or "404")
         # Visible but unreadable: the table is there and its grants are not. Repairable,
         # because GRANT/REVOKE are the last two statements.
         if exc.code in (401, 403) or code == "42501":
