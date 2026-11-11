@@ -89,5 +89,38 @@ class TableContract(unittest.TestCase):
             self.assertEqual(labels, ["create", "rls", "revoke_public", "grant_service_role"])
 
 
+class ProbeStates(unittest.TestCase):
+    """A 404 the schema cache raises is still a missing table, not an outage."""
+
+    def raise_http(self, code, body):
+        import io
+        import urllib.error
+
+        def fake(url, body_=None, timeout=60):
+            raise urllib.error.HTTPError(url, code, "err", {}, io.BytesIO(body))
+        return fake
+
+    def test_schema_cache_404_is_missing(self):
+        real, ensure.req = ensure.req, self.raise_http(404, b'{"code":"PGRST205"}')
+        try:
+            self.assertEqual(ensure.probe("t", ("a",)), ("missing", "PGRST205"))
+        finally:
+            ensure.req = real
+
+    def test_postgres_404_is_missing(self):
+        real, ensure.req = ensure.req, self.raise_http(404, b'{"code":"42P01"}')
+        try:
+            self.assertEqual(ensure.probe("t", ("a",)), ("missing", "42P01"))
+        finally:
+            ensure.req = real
+
+    def test_unreadable_table_is_private(self):
+        real, ensure.req = ensure.req, self.raise_http(403, b'{"code":"42501"}')
+        try:
+            self.assertEqual(ensure.probe("t", ("a",)), ("private", "42501"))
+        finally:
+            ensure.req = real
+
+
 if __name__ == "__main__":
     unittest.main()
