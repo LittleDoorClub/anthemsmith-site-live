@@ -147,6 +147,7 @@ class OneBoundedRepair(unittest.TestCase):
         result = gl.compose_photo_lyrics(PHOTO, "", "", "", "", "test-key", self.http(bodies))
         self.assertEqual(len(self.prompts), 6)
         self.assertEqual(result.provenance["grounding_review_scope"], "replaced_lines:1")
+        self.assertEqual(result.provenance["lines_replaced"], 1)
         # Only the refused line is asked for again -- never the other 23.
         self.assertIn("s2-l3", self.prompts[4])
         self.assertNotIn("s1-l1", self.prompts[4])
