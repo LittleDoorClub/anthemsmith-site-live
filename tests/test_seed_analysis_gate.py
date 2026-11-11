@@ -78,6 +78,13 @@ class TableContract(unittest.TestCase):
             for column in columns:
                 self.assertIn(column, create, (table, column))
 
+    def test_create_cannot_trip_the_recursion_gate(self):
+        """The deploy organ refuses any body matching "<own name> (" as self-recursion."""
+        for table in self.CONFLICT:
+            create = self.statements(table)["create"]
+            self.assertIn('public."%s"(' % table, create, table)
+            self.assertNotIn(" %s (" % table, create, table)
+
     def test_every_statement_carries_a_boolean_verify(self):
         for table in self.CONFLICT:
             for label, _, verify in ensure.statements(table, ensure.TABLES[table][1]):
