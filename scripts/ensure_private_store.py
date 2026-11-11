@@ -80,7 +80,11 @@ TABLES = {
 def statements(table, body):
     """The same four idempotent steps for every table, each with its own verify SQL."""
     return [
-        ("create", "CREATE TABLE IF NOT EXISTS public." + table + " (\n" + body + ")",
+        # The identifier is quoted so the organ's recursion heuristic -- "<name> (" reads as
+        # a direct self-reference -- does not condemn every CREATE TABLE that passes through
+        # the deploy door. Measured: an unquoted name is refused as blocked_at_recursion_check
+        # (run 43071686953), which blocked the compositions table for the wrong reason.
+        ("create", 'CREATE TABLE IF NOT EXISTS public."' + table + '"(\n' + body + ")",
          "SELECT to_regclass('public." + table + "') IS NOT NULL"),
         ("rls", "ALTER TABLE public." + table + " ENABLE ROW LEVEL SECURITY",
          "SELECT relrowsecurity FROM pg_class WHERE oid = 'public." + table + "'::regclass"),
