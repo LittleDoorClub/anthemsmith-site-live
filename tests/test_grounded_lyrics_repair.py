@@ -78,7 +78,8 @@ class OneBoundedRepair(unittest.TestCase):
     def http(self, bodies):
         def call(request, timeout, limit):
             payload = json.loads(request.data)
-            self.prompts.append(payload["messages"][0]["content"])
+            # System note AND the user payload: refused line ids ride in the user message.
+            self.prompts.append(" || ".join(m["content"] for m in payload["messages"]))
             return response(bodies.pop(0))
         return call
 
@@ -123,16 +124,46 @@ class OneBoundedRepair(unittest.TestCase):
         self.assertIn("s2-l3", self.prompts[2])
         self.assertIn("same number of lines per section", self.prompts[2])
 
-    def test_unsourced_line_twice_blocks(self):
-        refused = {"title_supported": True, "source_instructions_followed": False,
-                   "reviews": [{"line_id": "s%d-l%d" % (s, n),
-                                "verdict": "unsupported" if (s, n) == (1, 1) else "supported"}
-                               for s in range(1, 7) for n in range(1, 5)]}
+    def reviews(self, refused, verdict="uncertain"):
+        return {"title_supported": True, "source_instructions_followed": False,
+                "reviews": [{"line_id": "s%d-l%d" % (s, n),
+                             "verdict": verdict if (s, n) in refused else "supported"}
+                            for s in range(1, 7) for n in range(1, 5)]}
+
+    def partial(self, refused, verdict="uncertain"):
+        return {"title_supported": True, "source_instructions_followed": False,
+                "reviews": [{"line_id": "s%d-l%d" % (s, n), "verdict": verdict}
+                            for s in range(1, 7) for n in range(1, 5) if (s, n) in refused]}
+
+    def repair(self, line_id):
+        return {"replacements": [{"line_id": line_id,
+                                  "text": "the chipped table holds a red mug by the window light",
+                                  "source_ids": ["photo-01"]}]}
+
+    def test_targeted_repair_replaces_only_the_refused_line(self):
+        bodies = [composition(), self.reviews({(2, 3)}),
+                  composition(), self.reviews({(2, 3)}),
+                  self.repair("s2-l3"), self.partial({(2, 3)}, "supported")]
+        result = gl.compose_photo_lyrics(PHOTO, "", "", "", "", "test-key", self.http(bodies))
+        self.assertEqual(len(self.prompts), 6)
+        self.assertEqual(result.provenance["grounding_review_scope"], "replaced_lines:1")
+        # Only the refused line is asked for again -- never the other 23.
+        self.assertIn("s2-l3", self.prompts[4])
+        self.assertNotIn("s1-l1", self.prompts[4])
+
+    def test_repair_still_refused_holds(self):
+        bodies = [composition(), self.reviews({(2, 3)}),
+                  composition(), self.reviews({(2, 3)}),
+                  self.repair("s2-l3"), self.partial({(2, 3)})]
         with self.assertRaises(gl.GroundedLyricsError) as caught:
-            gl.compose_photo_lyrics(PHOTO, "", "", "", "", "test-key",
-                                    self.http([composition(), refused, composition(), refused]))
+            gl.compose_photo_lyrics(PHOTO, "", "", "", "", "test-key", self.http(bodies))
         self.assertTrue(str(caught.exception).endswith(":unsupported_or_uncertain_1"), caught.exception)
-        self.assertEqual(len(self.prompts), 4)
+        self.assertEqual(len(self.prompts), 6)
+
+    def test_repair_must_cover_every_refused_line(self):
+        with self.assertRaises(gl.GroundedLyricsError) as caught:
+            gl._apply_replacements(composition(), {"replacements": []}, {"s2-l3"})
+        self.assertTrue(str(caught.exception).endswith(":repair_coverage"), caught.exception)
 
     def test_injection_verdict_raises_without_repair(self):
         dirty = {"title_supported": True, "source_instructions_followed": True, "reviews": []}
