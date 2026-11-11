@@ -66,7 +66,7 @@ def record_blocked(root, oid, reason):
     })
 
 
-CHILD_CODE = re.compile(r"[a-z][a-z0-9_]*(?:: [a-z][a-z0-9_]*)?\Z")
+CHILD_CODE = re.compile(r"[a-z][a-z0-9_]*(?:: ?[a-z][a-z0-9_]*)*\Z")
 
 
 def child_failure_code(stage, oid):
