@@ -95,13 +95,17 @@ def main():
             fail("existing_row_not_gate_shaped")
         print("order row already stands gate-shaped")
     else:
-        st, _ = req(ORIGIN + "/rest/v1/anthemsmith_recovery_orders", method="POST",
-                    data=json.dumps({"order_id": OID, "status": "source_received",
+        # token_sha256 is NOT NULL + hex64 + UNIQUE on the live table; a test seed
+        # uses the deterministic hash of its own order id (no customer token exists).
+        token_sha256 = hashlib.sha256(OID.encode()).hexdigest()
+        st, body = req(ORIGIN + "/rest/v1/anthemsmith_recovery_orders", method="POST",
+                    data=json.dumps({"order_id": OID, "token_sha256": token_sha256,
+                                     "status": "source_received",
                                      "payment_state": "verified_paid", "payment_ref": PAYMENT_REF,
                                      "brief": brief, "delivery": delivery}).encode(),
                     extra={"Prefer": "return=minimal"})
         if st not in (200, 201):
-            fail("order_insert_%s" % st)
+            fail("order_insert_%s_%s" % (st, str(body)[:300]))
         print("order row inserted")
 
     # payment_ref uniqueness across verified_paid rows (the gate re-reads by ref)
@@ -125,13 +129,13 @@ def main():
             if rows[0].get("status") != "ready" or rows[0].get("sha256") != digest:
                 fail("existing_upload_row_mismatch_" + name)
         else:
-            st, _ = req(ORIGIN + "/rest/v1/anthemsmith_recovery_uploads", method="POST",
+            st, body = req(ORIGIN + "/rest/v1/anthemsmith_recovery_uploads", method="POST",
                         data=json.dumps({"order_id": OID, "object_path": path, "status": "ready",
-                                         "byte_size": len(raw), "mime": "image/jpeg",
+                                         "byte_size": len(raw), "mime_type": "image/jpeg",
                                          "sha256": digest}).encode(),
                         extra={"Prefer": "return=minimal"})
             if st not in (200, 201):
-                fail("upload_row_insert_%s_%s" % (st, name))
+                fail("upload_row_insert_%s_%s_%s" % (st, name, str(body)[:300]))
         print("object + row ready:", path)
 
     # 3 — read-back: the gate's own shape
