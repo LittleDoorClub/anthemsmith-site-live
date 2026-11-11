@@ -21,6 +21,7 @@ import json
 import os
 import pathlib
 import sys
+import uuid
 import urllib.error
 import urllib.request
 
@@ -130,7 +131,8 @@ def main():
                 fail("existing_upload_row_mismatch_" + name)
         else:
             st, body = req(ORIGIN + "/rest/v1/anthemsmith_recovery_uploads", method="POST",
-                        data=json.dumps({"order_id": OID, "object_path": path, "status": "ready",
+                        data=json.dumps({"id": str(uuid.uuid4()), "order_id": OID,
+                                         "object_path": path, "status": "ready",
                                          "byte_size": len(raw), "mime_type": "image/jpeg",
                                          "sha256": digest}).encode(),
                         extra={"Prefer": "return=minimal"})
