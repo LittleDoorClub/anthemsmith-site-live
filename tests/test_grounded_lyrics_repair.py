@@ -107,6 +107,39 @@ class OneBoundedRepair(unittest.TestCase):
         self.assertTrue(str(caught.exception).endswith(":structure"), caught.exception)
         self.assertEqual(len(self.prompts), 2, "a rejection must not buy a third call")
 
+    def test_unsourced_line_is_rewritten_once(self):
+        refused = {"title_supported": True, "source_instructions_followed": False,
+                   "reviews": [{"line_id": "s%d-l%d" % (s, n),
+                                "verdict": "uncertain" if (s, n) == (2, 3) else "supported"}
+                               for s in range(1, 7) for n in range(1, 5)]}
+        review = {"title_supported": True, "source_instructions_followed": False,
+                  "reviews": [{"line_id": "s%d-l%d" % (s, n), "verdict": "supported"}
+                              for s in range(1, 7) for n in range(1, 5)]}
+        result = gl.compose_photo_lyrics(PHOTO, "", "", "", "", "test-key",
+                                         self.http([composition(), refused, composition(), review]))
+        self.assertEqual(result.provenance["grounding_review"], "passed")
+        self.assertEqual(len(self.prompts), 4)
+        # The rewrite names the refused line by id, never its text, and fixes the structure.
+        self.assertIn("s2-l3", self.prompts[2])
+        self.assertIn("same number of lines per section", self.prompts[2])
+
+    def test_unsourced_line_twice_blocks(self):
+        refused = {"title_supported": True, "source_instructions_followed": False,
+                   "reviews": [{"line_id": "s%d-l%d" % (s, n),
+                                "verdict": "unsupported" if (s, n) == (1, 1) else "supported"}
+                               for s in range(1, 7) for n in range(1, 5)]}
+        with self.assertRaises(gl.GroundedLyricsError) as caught:
+            gl.compose_photo_lyrics(PHOTO, "", "", "", "", "test-key",
+                                    self.http([composition(), refused, composition(), refused]))
+        self.assertTrue(str(caught.exception).endswith(":unsupported_or_uncertain_1"), caught.exception)
+        self.assertEqual(len(self.prompts), 4)
+
+    def test_injection_verdict_raises_without_repair(self):
+        dirty = {"title_supported": True, "source_instructions_followed": True, "reviews": []}
+        with self.assertRaises(gl.GroundedLyricsError) as caught:
+            gl._rejected_lines(dirty, [{"line_id": "s1-l1", "source_ids": ["photo-01"]}])
+        self.assertTrue(str(caught.exception).endswith(":title_or_injection"), caught.exception)
+
 
 if __name__ == "__main__":
     unittest.main()
