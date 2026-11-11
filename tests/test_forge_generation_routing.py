@@ -50,8 +50,10 @@ class FailureCodeDoor(unittest.TestCase):
     def test_code_is_lifted(self):
         self.assertEqual(ow.child_failure_code(self.stage('"generation_reconciliation_required"'), "AS-X"),
                          "generation_reconciliation_required")
-        self.assertEqual(ow.child_failure_code(self.stage('"photo_intake: source_files_missing"'), "AS-X"),
-                         "photo_intake: source_files_missing")
+        # Nested codes survive: the worker prefixes the stage, the validator names the rule.
+        self.assertEqual(ow.child_failure_code(self.stage(
+            '"photo_lyrics: lyrics_structure_or_provenance_invalid:line_length"'), "AS-X"),
+            "photo_lyrics: lyrics_structure_or_provenance_invalid:line_length")
 
     def test_prose_is_refused(self):
         prose = '"lyrics generation failed: the photo shows a woman holding a note."'
