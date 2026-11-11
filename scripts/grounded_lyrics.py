@@ -349,14 +349,14 @@ def compose_photo_lyrics(analysis, brief, category, mood, voice, api_key, http=_
         return review, review_id
 
     def result(composition, lyrics, lines, word_count, composition_id, review_id,
-               scope="all_lines"):
+               scope="all_lines", replaced=0):
         return LyricsResult(composition["title"].strip(), lyrics, {
             "provider": "openai", "model": MODEL, "composition_request_id": composition_id,
             "review_request_id": review_id, "photo_ids": sorted(photo_ids),
             "evidence_sha256": hashlib.sha256(json.dumps(evidence, sort_keys=True).encode()).hexdigest(),
             "lyrics_sha256": hashlib.sha256(lyrics.encode()).hexdigest(), "word_count": word_count,
             "target_duration_seconds": [180, 240], "grounding_review": "passed",
-            "grounding_review_scope": scope,
+            "grounding_review_scope": scope, "lines_replaced": replaced,
             "line_sources": [{"line_id": line["line_id"], "source_ids": line["source_ids"]}
                              for line in lines]})
 
@@ -395,6 +395,9 @@ def compose_photo_lyrics(analysis, brief, category, mood, voice, api_key, http=_
         # refused lines and re-review just those, so a fresh draft cannot smuggle a new
         # unsupported line past the gate. Pass 2 drops metaphor entirely: a second failure is
         # almost always a line that asserts a feeling instead of a visible detail.
+        # Count what the whole repair touched: the final review only re-judges what the last
+        # pass rewrote, so the scope alone would under-report how many lines actually changed.
+        replaced_total = len(rejected)
         for pass_no in (1, 2):
             wanted = [line for line in lines if line["line_id"] in rejected]
             repair, _ = _call(api_key,
@@ -415,7 +418,7 @@ def compose_photo_lyrics(analysis, brief, category, mood, voice, api_key, http=_
             still = _rejected_lines(partial, again, check_title=False)
             if not still:
                 return result(composition, lyrics, lines, word_count, composition_id, review_id,
-                              scope="replaced_lines:%d" % len(rejected))
+                              scope="replaced_lines:%d" % len(rejected), replaced=replaced_total)
             rejected = still
         raise GroundedLyricsError(
             "lyrics_grounding_rejected:unsupported_or_uncertain_%d" % len(rejected))
