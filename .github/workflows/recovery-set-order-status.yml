@@ -1,0 +1,81 @@
+name: recovery-set-order-status
+
+# Repair tool for a status row that lies. The forge writes songs/<oid>.json with
+# status audio_ready but never PATCHes anthemsmith_recovery_orders.status, so a
+# row can read source_received after the lane actually delivered. This workflow
+# is the single sanctioned hand for that one write — it refuses unless the repo
+# manifest and the named run agree with the status being written.
+#
+# Shape of record: recovery-order-state.yml / seed-test-order.yml. The service
+# key already lives in the Actions env; nothing new is minted or stored.
+
+on:
+  workflow_dispatch:
+    inputs:
+      order_id:
+        description: 'Exact recovery order id (e.g. AS-TEST-MAYA-20261110)'
+        required: true
+        type: string
+      status:
+        description: 'Target status — must already be what the repo manifest says'
+        required: true
+        type: choice
+        options:
+          - audio_ready
+          - delivered
+      run_id:
+        description: 'Actions run id that produced the audio (must be green)'
+        required: true
+        type: string
+      main_sha:
+        description: 'Full 40-char main commit that run executed on'
+        required: true
+        type: string
+      mode:
+        description: 'inspect = read only, write = one guarded PATCH'
+        required: true
+        default: 'inspect'
+        type: choice
+        options:
+          - inspect
+          - write
+
+permissions:
+  contents: read
+  actions: read
+
+# One writer per order, and a retry never cancels an in-flight write.
+concurrency:
+  group: recovery-order-status-${{ inputs.order_id }}
+  cancel-in-progress: false
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Refuse unless manifest and run agree, then write one row
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: >-
+          python scripts/set_order_status.py
+          --order-id "${{ inputs.order_id }}"
+          --status "${{ inputs.status }}"
+          --run-id "${{ inputs.run_id }}"
+          --main-sha "${{ inputs.main_sha }}"
+          --mode "${{ inputs.mode }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: order-status-evidence-${{ inputs.mode }}
+          path: '*.status-evidence.json'
+          if-no-files-found: warn
