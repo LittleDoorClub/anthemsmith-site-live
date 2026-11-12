@@ -9,7 +9,8 @@ Runs ONLY in GitHub Actions (env SUPABASE_SERVICE_ROLE_KEY). Contract =
 scripts/order_workflow.py canonical_order() read from true remote
 sha 451f9f9a; bucket = photo_intake.py's BUCKET. Spec: filing 16 at the
 Anthemist lane. Companion files in the push batch:
-  scripts/seed_details_alex.txt — brief.details, 1,506 chars, sha256 pinned below
+  scripts/seed_details_alex.txt — brief.details, 1,442 chars CLEANED per Brain ref 114094
+  (one quoted-lyric caption removed, Maya 0 ruling fix B), sha256 pinned below
   seed-assets/alex/*.jpg        — the 3 photos, first image of the 3 packet posts
 
 Safety shape (house pattern): read first · refuse on any mismatch ·
@@ -29,8 +30,8 @@ ORIGIN = "https://veqpmdsiqcjjpxgcubrp.supabase.co"
 BUCKET = "anthemsmith-orders"
 OID = "AS-TEST-ALEX-20261111"
 PAYMENT_REF = "TEST-INTERNAL-20261111"  # test-internal marker: NO money, NO customer
-DETAILS_LEN = 1506
-DETAILS_SHA256 = "ebf604bc8bf361d6a00e43681e773d682895a7b4189cd6ec8e021a91ef5ef212"
+DETAILS_LEN = 1442
+DETAILS_SHA256 = "d6235495ddd903b9d87873e2eda999a078baac1a6ab49f57622b29910939ac14"
 HERE = pathlib.Path(__file__).resolve().parent
 
 PHOTOS = [  # (filename, expected bytes, expected sha256) — packet posts, first image each
