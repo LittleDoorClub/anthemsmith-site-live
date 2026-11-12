@@ -109,12 +109,12 @@ def main():
              "voice": "female", "mood": "warm, uplifting",
              "reference_title": "Alaska", "reference_artist": "Maggie Rogers",
              "reference_url": "", "public_audio_consent": True}
-    delivery = {"mode": "email", "email": "gabrieljtao@gmail.com",
+    delivery = {"mode": "email", "email": "cozyafllc@gmail.com",
                 "sms_to": "", "consent_verified": True}
 
     # 1 — the order row (idempotent: an existing gate-shaped row stands)
     st, rows = req(ORIGIN + "/rest/v1/anthemsmith_recovery_orders?order_id=eq." + OID +
-                   "&select=order_id,status,payment_state,payment_ref")
+                   "&select=order_id,status,payment_state,payment_ref,brief")
     if st != 200:
         fail("orders_read_%s" % st)
     if rows:
@@ -123,6 +123,24 @@ def main():
                 and row.get("status") == "source_received"):
             fail("existing_row_not_gate_shaped")
         print("order row already stands gate-shaped")
+        # Brain ref 114094 (cleaned brief, fix B): an existing row keeps its gate
+        # shape, but its brief must carry the cleaned text. PATCH only when the
+        # stored digest differs, so a correct row stays zero-writes.
+        stored = (row.get("brief") or {}).get("details") or ""
+        if hashlib.sha256(stored.encode("utf-8")).hexdigest() != DETAILS_SHA256:
+            st, body = req(ORIGIN + "/rest/v1/anthemsmith_recovery_orders?order_id=eq." + OID,
+                           method="PATCH", data=json.dumps({"brief": brief}).encode(),
+                           extra={"Prefer": "return=representation"})
+            if st not in (200, 201, 204):
+                fail("order_brief_patch_%s_%s" % (st, str(body)[:300]))
+            st, back = req(ORIGIN + "/rest/v1/anthemsmith_recovery_orders?order_id=eq." + OID
+                           + "&select=brief")
+            got = ((back[0].get("brief") or {}).get("details") or "") if (st == 200 and back) else ""
+            if hashlib.sha256(got.encode("utf-8")).hexdigest() != DETAILS_SHA256:
+                fail("order_brief_readback_%s" % st)
+            print("brief.details reconciled to cleaned text: %d chars, sha256 matches packet" % len(got))
+        else:
+            print("brief.details already carries the cleaned text")
     else:
         # token_sha256 is NOT NULL + hex64 + UNIQUE on the live table; a test seed
         # uses the deterministic hash of its own order id (no customer token exists).
