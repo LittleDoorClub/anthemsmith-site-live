@@ -98,7 +98,7 @@ def main():
     brief = {"intake": "photos", "details": details, "category": "My Story",
              "voice": "female", "mood": "warm, funny, gothic",
              "reference_url": "", "public_audio_consent": True}
-    delivery = {"mode": "email", "email": "gabrieljtao@gmail.com",
+    delivery = {"mode": "email", "email": "cozyafllc@gmail.com",
                 "sms_to": "", "consent_verified": True}
 
     # 1 — the order row (idempotent: an existing gate-shaped row stands)
