@@ -86,7 +86,36 @@ def rest(method, params=None, body=None, prefer=None):
             raw = response.read(512 * 1024)
             return response.status, (json.loads(raw) if raw else None)
     except urllib.error.HTTPError as exc:
-        raise Hold("rest_http_%s:%s" % (exc.code, exc.read(200).decode("utf-8", "replace")))
+        raise Hold("rest_http_%s:%s" % (exc.code, postgrest_reason(exc.read(400))))
+
+
+def postgrest_reason(raw):
+    """PostgREST's `details` field quotes the failing row's values.
+
+    Keep the SQLSTATE code, the constraint name and the message — enough to
+    diagnose — and drop `details` entirely so CI logs never carry row content.
+    """
+    text = raw.decode("utf-8", "replace") if isinstance(raw, (bytes, bytearray)) else str(raw)
+    try:
+        body = json.loads(text)
+    except ValueError:
+        return text[:120]
+    if not isinstance(body, dict):
+        return text[:120]
+    parts = [str(body.get("code") or "").strip(),
+             _constraint_name(body),
+             str(body.get("message") or "").strip()[:80]]
+    return "/".join(part for part in parts if part)
+
+
+def _constraint_name(body):
+    """PostgREST only fills `constraint` for some SQLSTATEs; the 23514 message
+    still names it, so recover it from there rather than losing the diagnosis."""
+    name = str(body.get("constraint") or "").strip()
+    if name:
+        return name
+    match = re.search(r'check constraint "([^"]+)"', str(body.get("message") or ""))
+    return match.group(1) if match else ""
 
 
 def gh(path):
