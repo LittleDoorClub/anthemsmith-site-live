@@ -104,8 +104,9 @@ def _parse_vision(body):
             raise ValueError("incomplete or refused")
         result = json.loads(message["content"])
         required = {"description", "observations", "visible_text", "uncertainties"}
-        if not isinstance(result, dict) or set(result) != required:
+        if not isinstance(result, dict) or not required.issubset(result):
             raise ValueError("schema")
+        result = {key: result[key] for key in required}
         if not isinstance(result["description"], str) or not (20 <= len(result["description"].strip()) <= 2000):
             raise ValueError("empty description")
         for key in ("observations", "visible_text", "uncertainties"):
@@ -239,18 +240,27 @@ def _intake_photos(references, order_id, supabase_url, service_key, openai_key, 
             {"type": "text", "text": prompt},
             {"type": "image_url", "image_url": {
                 "url": "data:" + mime + ";base64," + base64.b64encode(data).decode(), "detail": "high"}}
-        ]}], "response_format": {"type": "json_object"}, "max_tokens": 1800, "temperature": 0.2}
+        ]}], "response_format": {"type": "json_object"}, "max_tokens": 3200, "temperature": 0.2}
         request = urllib.request.Request(_API_BASE + "/chat/completions",
             data=json.dumps(body).encode(), method="POST",
             headers={"Authorization": "Bearer " + _API_KEY, "Content-Type": "application/json",
                      "HTTP-Referer": "https://anthemsmith.com", "X-Title": "AnthemSmith"})
-        try:
-            response, _ = http(request, 90, 128 * 1024)
-        except PhotoIntakeError:
-            raise
-        except Exception:
-            raise PhotoIntakeError("vision_provider_unavailable") from None
-        parsed, request_id, model = _parse_vision(response)
+        parsed = None
+        for attempt in range(2):
+            try:
+                response, _ = http(request, 90, 128 * 1024)
+            except PhotoIntakeError:
+                raise
+            except Exception:
+                raise PhotoIntakeError("vision_provider_unavailable") from None
+            try:
+                parsed, request_id, model = _parse_vision(response)
+                break
+            except PhotoIntakeError:
+                if attempt == 1:
+                    raise
+        if parsed is None:
+            raise PhotoIntakeError("vision_incomplete_or_invalid")
         analysis.append({"source_id": f"photo-{index:02d}", "storage_path": BUCKET + "/" + key,
                          "sha256": hashlib.sha256(data).hexdigest(), "mime": mime,
                          "bytes": len(data), "width": width, "height": height,
