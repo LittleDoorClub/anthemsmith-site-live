@@ -506,8 +506,17 @@ grounded_photo_lyrics = False
 if photo_analysis:
     from grounded_lyrics import GroundedLyricsError, compose_photo_lyrics
     from photo_intake import PhotoIntakeError, persist_composition
+    lock_block = anchor_law.chorus_block([DETAILS]) if DETAILS else []
     try:
-        song = compose_photo_lyrics(photo_analysis, DETAILS, CATEGORY, MOOD, VOICE, OPENAI_KEY)
+        song = compose_photo_lyrics(photo_analysis, DETAILS, CATEGORY, MOOD, VOICE, OPENAI_KEY,
+                                    locked_chorus=lock_block or None)
+        # CHORUS GATE -- before persist, before any generation spend: every locked
+        # brief sentence must be present in the composed lyrics VERBATIM. The
+        # composer's own chorus invention shipped AS-TEST-MAYA-20261110 with the
+        # anchor nowhere in it; this gate makes that shape impossible to spend on.
+        if lock_block and not all(sentence in song.lyrics for sentence in lock_block):
+            die("chorus_lock_missing: locked brief sentences absent from composed "
+                "lyrics -- refusing generation spend")
         persist_composition(OID, photo_analysis, song, SUPABASE_URL, SUPABASE_SR_KEY)
     except (GroundedLyricsError, PhotoIntakeError) as error:
         die("photo_lyrics: " + str(error))

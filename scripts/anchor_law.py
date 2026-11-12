@@ -51,7 +51,7 @@ LIFE_RE = re.compile(
     r"dream|proud|love|loved|scared|afraid|hard|struggle|struggled|fight|fought)\b",
     re.I,
 )
-SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|(?<=[.!?])(?=[^\s.])|\n+")
 
 
 def strip_noise(text):
@@ -159,6 +159,59 @@ def chorus(anchor):
     return None
 
 
+def chorus_block(texts):
+    """The chorus lock block: the winning sentence + the caption's closing line.
+
+    pick() ranks single sentences, but the customer's caption is the unit they
+    wrote. The lock carries TWO of its sentences, verbatim: the story-weight
+    winner (the hook) and the caption's LAST eligible sentence (the closing
+    heart line -- captions end on the keeper; trailing CTAs and hashtag blocks
+    are promotional/stripped, so they never qualify). Returns 0-2 sentences;
+    empty when no eligible source exists (the F1 fence holds).
+    """
+    ranked = candidates(texts)
+    if not ranked:
+        return []
+    winner = ranked[0][2]
+    for text in texts or []:
+        for unit in strip_noise(text).splitlines():
+            sentences = split_sentences(unit)
+            if winner in sentences:
+                # The caption's story runs until its sales tail begins: the
+                # first price/shipping/promotional sentence ENDS eligibility
+                # (everything after it is CTA, hashtags, shop lines -- never
+                # the customer's closing line, even when the tail borrows a
+                # first-person word: "Buy my lamps pleeeasee!").
+                eligible = []
+                for sentence in sentences:
+                    sentence = strip_noise(sentence)
+                    if not sentence:
+                        continue
+                    if PRICE_RE.search(sentence) or SHIPPING_RE.search(sentence):
+                        break
+                    if promotional(sentence):
+                        break
+                    # An imperative sales opener ("Buy my lamps!") is the tail
+                    # even when it borrows a first-person word -- promotional()
+                    # deliberately spares first-person lines, so the block
+                    # builder applies this narrower test on top of it.
+                    if re.match(r"[^A-Za-z0-9]*(?:buy|shop|order|purchase|click|dm|grab|get yours)\b",
+                                sentence, re.I):
+                        break
+                    # A singable line carries words: emoji/symbol fragments left
+                    # over from segmentation are not customer sentences.
+                    if len(re.findall(r"[A-Za-z0-9']+", sentence)) < 3:
+                        continue
+                    eligible.append(sentence)
+                if not eligible:
+                    return [winner]
+                block = [winner]
+                if eligible[-1] != winner:
+                    block.append(eligible[-1])
+                return block
+    return [winner]
+
+
 def _selftest():
     checks = []
 
@@ -195,6 +248,12 @@ def _selftest():
     checks.append(("multi-caption chorus is clean",
                    chorus(blob_line) == "I created my job out of thin air and I absolutely love it."))
 
+    checks.append(("chorus block carries BOTH sentences of the human caption",
+                   chorus_block([sales, human, launch]) ==
+                   ["I created my job out of thin air and I absolutely love it.",
+                    "My 6-year-old would be proud"]))
+    checks.append(("chorus block of pure sales text is empty (F1 fence)",
+                   chorus_block([sales]) == []))
     bad = [name for name, ok in checks if not ok]
     print("anchor_law selftest: %d/%d passed" % (len(checks) - len(bad), len(checks)))
     for name in bad:

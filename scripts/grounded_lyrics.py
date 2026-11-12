@@ -285,7 +285,36 @@ class LyricsResult:
     provenance: dict
 
 
-def compose_photo_lyrics(analysis, brief, category, mood, voice, api_key, http=_http):
+
+def _apply_chorus_lock(composition, locked):
+    """Deterministically splice the locked customer sentences into every chorus.
+
+    The composer is TOLD the chorus is locked, but a prompt is not a gate: this
+    splice is. The first len(locked) lines of each Chorus / Final Chorus section
+    are replaced with the customer's verbatim sentences, cited to the brief.
+    Runs after the grounding review passes, so no unreviewed model line can
+    displace them afterwards (the repair path's returns pass through here too).
+    """
+    for section in composition["sections"]:
+        if section["name"] in ("Chorus", "Final Chorus"):
+            for i, sentence in enumerate(locked):
+                section["lines"][i] = {"text": sentence, "source_ids": ["customer-brief"]}
+
+
+def _assemble(composition):
+    """Rebuild (lyrics, review_lines, word_count) from a composition, mirroring
+    the assembly in _validate_composition exactly."""
+    review_lines, words = [], []
+    for s_idx, section in enumerate(composition["sections"], 1):
+        for n, line in enumerate(section["lines"], 1):
+            review_lines.append({"line_id": f"s{s_idx}-l{n}", "text": line["text"],
+                                 "source_ids": line["source_ids"]})
+            words += re.findall(r"\b[\w\u2019'-]+\b", line["text"])
+    lyrics = "\n\n".join("[" + sec["name"] + "]\n" + "\n".join(
+        line["text"].strip() for line in sec["lines"]) for sec in composition["sections"])
+    return lyrics, review_lines, len(words)
+
+def compose_photo_lyrics(analysis, brief, category, mood, voice, api_key, http=_http, locked_chorus=None):
     """Return only fully composed and reviewed lyrics. Never invoke a music API.
 
     A 220–520-word arrangement is a 3–4 minute composition target, not a duration
@@ -295,8 +324,17 @@ def compose_photo_lyrics(analysis, brief, category, mood, voice, api_key, http=_
         raise GroundedLyricsError("lyrics_configuration_missing")
     if any(not isinstance(v, str) or len(v) > 160 for v in (category, mood, voice)):
         raise GroundedLyricsError("lyrics_preferences_invalid")
+    locked = []
+    if locked_chorus is not None:
+        if (not isinstance(locked_chorus, (list, tuple)) or not 1 <= len(locked_chorus) <= 2
+                or any(not isinstance(v, str) or not v.strip() or len(v) > 180
+                       or any(c in v for c in "\n\r[]") for v in locked_chorus)):
+            raise GroundedLyricsError("lyrics_chorus_lock_invalid")
+        locked = [v.strip() for v in locked_chorus]
     evidence = _evidence(analysis, brief)
     source_ids = {s["source_id"] for s in evidence}
+    if locked and "customer-brief" not in source_ids:
+        raise GroundedLyricsError("lyrics_chorus_lock_without_brief")
     photo_ids = {s["source_id"] for s in evidence if s["kind"] == "visual_observations"}
     instructions = (
         "Write an original, specific, singable AnthemSmith song from supplied evidence. "
@@ -320,8 +358,14 @@ def compose_photo_lyrics(analysis, brief, category, mood, voice, api_key, http=_
         "Aim for a 3–4 minute song arrangement. Make the chorus memorable, with "
         "a concrete recurring hook. Each line must cite one or more exact source_ids that "
         "support it. Return the required JSON only; no source citations inside sung text."
+        + (" The chorus is LOCKED: the first %d line(s) of every Chorus section and of the "
+           "Final Chorus must be exactly these customer sentences, verbatim and in order, "
+           "each cited to source_id customer-brief: %s Write the remaining chorus lines "
+           "around them." % (len(locked), " / ".join(locked)) if locked else "")
     )
     ask = {"evidence": evidence, "preferences": {"category": category, "mood": mood, "voice": voice}}
+    if locked:
+        ask["chorus_lock"] = {"sentences": locked, "source_id": "customer-brief"}
 
     def compose(note=""):
         return _call(api_key, instructions + note, ask,
@@ -358,7 +402,8 @@ def compose_photo_lyrics(analysis, brief, category, mood, voice, api_key, http=_
             "target_duration_seconds": [180, 240], "grounding_review": "passed",
             "grounding_review_scope": scope, "lines_replaced": replaced,
             "line_sources": [{"line_id": line["line_id"], "source_ids": line["source_ids"]}
-                             for line in lines]})
+                             for line in lines],
+            **({"chorus_lock": {"sentences": locked, "source_id": "customer-brief"}} if locked else {})})
 
     # Two attempts, never more. The first is the draft; the second exists because a paid order
     # must not die on one formatting drift or one unsourced line -- and each attempt is
@@ -381,6 +426,9 @@ def compose_photo_lyrics(analysis, brief, category, mood, voice, api_key, http=_
         review, review_id = review_of(composition["title"], lines)
         rejected = _rejected_lines(review, lines)
         if not rejected:
+            if locked:
+                _apply_chorus_lock(composition, locked)
+                lyrics, lines, word_count = _assemble(composition)
             return result(composition, lyrics, lines, word_count, composition_id, review_id)
         if attempt == 1:
             # Name the refused lines by id -- never their text -- and keep the structure fixed,
@@ -417,6 +465,9 @@ def compose_photo_lyrics(analysis, brief, category, mood, voice, api_key, http=_
             partial, review_id = review_of(composition["title"], again)
             still = _rejected_lines(partial, again, check_title=False)
             if not still:
+                if locked:
+                    _apply_chorus_lock(composition, locked)
+                    lyrics, lines, word_count = _assemble(composition)
                 return result(composition, lyrics, lines, word_count, composition_id, review_id,
                               scope="replaced_lines:%d" % len(rejected), replaced=replaced_total)
             rejected = still
