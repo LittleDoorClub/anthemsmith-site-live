@@ -8,6 +8,7 @@ how many uploads does it have?
 Prints NO phone, NO email, NO brief values, NO token bytes, NO key.
 Any write in this file is a defect.
 """
+import hashlib
 import json
 import os
 import sys
@@ -17,7 +18,8 @@ import urllib.request
 from datetime import datetime, timezone
 
 ORIGIN = 'https://veqpmdsiqcjjpxgcubrp.supabase.co'
-ORDER = 'AS-MUIJ11B6'
+# ORDER_ID lets one read-only run probe any order; default stays the recovery order.
+ORDER = os.environ.get('ORDER_ID') or 'AS-MUIJ11B6'
 TABLE = 'anthemsmith_recovery_orders'
 SELECT = 'order_id,status,payment_state,payment_ref,token_sha256,token_issued_at,expires_at,brief,delivery,delivery_result'
 
@@ -85,6 +87,10 @@ def main():
         'brief_keys': sorted(brief.keys()),
         'brief_sources': {k: shape(brief.get(k)) for k in
                           ('ig_url', 'ig_url2', 'reference_url', 'details', 'recovery_evidence')},
+        # sha256 prefix of brief.details only (a hash, never the text): lets a reader
+        # compare the stored brief against a pinned packet without printing content.
+        'brief_details_sha256_12': (hashlib.sha256(brief['details'].encode('utf-8')).hexdigest()[:12]
+                                    if isinstance(brief.get('details'), str) else None),
         'creative': {k: brief.get(k) for k in ('intake', 'category', 'mood', 'voice')},
         'brief_has_recovery_evidence': bool(brief.get('recovery_evidence')),
         'brief_category_present': bool(brief.get('category')),

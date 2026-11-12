@@ -3,6 +3,11 @@ run-name: recovery-order-state read-only
 
 on:
   workflow_dispatch:
+    inputs:
+      order_id:
+        description: 'Order id to read (blank = AS-MUIJ11B6, the recovery order)'
+        required: false
+        default: 'AS-MUIJ11B6'
 
 permissions:
   contents: read
@@ -19,6 +24,7 @@ jobs:
       - name: Read recovery order shape (no writes, no personal data)
         env:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ORDER_ID: ${{ inputs.order_id }}
         run: python scripts/recovery_order_state.py
       - name: Keep evidence
         if: always()
