@@ -1,0 +1,40 @@
+name: recovery-order-lifecycle
+
+# Read-only answer to one question: did the lane run, and did it deliver?
+#
+# Three sources side by side, never blended -- intake.* (the row's real gate
+# fields), manifest.* (songs/<oid>.json), delivery.* (songs/<oid>.delivery.json).
+# A missing manifest projects `unknown`; it is never back-filled from
+# intake.status, because that column is an intake gate and reading it as
+# lifecycle is exactly how a healthy-looking pipeline stops.
+#
+# No writes: scripts/order_lifecycle.py has no PATCH/POST path at all, and the
+# service key is used for one SELECT.
+
+on:
+  workflow_dispatch:
+    inputs:
+      order_id:
+        description: 'Exact recovery order id (e.g. AS-TEST-MAYA-20261110)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Project lifecycle from intake + manifest + delivery
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python scripts/order_lifecycle.py --order-id "${{ inputs.order_id }}" --songs-dir songs
