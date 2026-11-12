@@ -44,6 +44,8 @@ REVIEW_SCHEMA = _object({"title_supported": {"type": "boolean"},
 REPAIR_SCHEMA = _object({"replacements": {"type": "array", "items":
     _object({"line_id": _STR, "text": _STR, "source_ids": _STRINGS})}})
 
+TITLE_SCHEMA = _object({"title": _STR})
+
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -153,12 +155,29 @@ def _shape(composition):
         sum(len(re.findall(r"\b[\w’'-]+\b", text)) for text in lines))
 
 
+def _verdict_trip(review, check_title=True):
+    """Name the safety verdict that trips this review, or None.
+
+    The two verdicts are different failures and are named separately so a
+    held run says which one fired: the injection verdict (the song obeyed
+    an instruction embedded in source text) is a safety failure and stays
+    instantly fatal; an unsupported title is metadata drift the call site
+    may repair exactly once. The injection verdict outranks the title.
+    """
+    if review.get("source_instructions_followed") is not False:
+        return "source_instructions_followed"
+    if check_title and review.get("title_supported") is not True:
+        return "title_supported"
+    return None
+
+
 def _rejected_lines(review, lines, check_title=True):
     """Validate the review envelope, then return the line_ids it refused.
 
     Ids only: the reviewer's reasons and the lyric text stay out of every message and log.
-    A broken envelope or a failed title/injection verdict raises rather than being repaired --
-    those are safety signals, not formatting drift a rewrite should be talked out of.
+    A broken envelope raises. A failed safety verdict also raises, named by
+    _verdict_trip: the injection verdict is never repaired; the title verdict
+    is repaired once, at the call site, by retitling -- never by this function.
 
     ``check_title=False`` is for a re-review of replacement lines: the title is not part of
     that payload, so its verdict there is out of scope -- the full review already ruled on it
@@ -167,9 +186,9 @@ def _rejected_lines(review, lines, check_title=True):
     try:
         if set(review) != {"title_supported", "source_instructions_followed", "reviews"}:
             raise ValueError("review_schema")
-        if (review["title_supported"] is not True and check_title) or \
-                review["source_instructions_followed"] is not False:
-            raise ValueError("title_or_injection")
+        trip = _verdict_trip(review, check_title)
+        if trip is not None:
+            raise ValueError(trip)
         expected = {line["line_id"] for line in lines}
         reviewed = review["reviews"]
         if not isinstance(reviewed, list) or len(reviewed) != len(expected):
@@ -408,6 +427,7 @@ def compose_photo_lyrics(analysis, brief, category, mood, voice, api_key, http=_
     # Two attempts, never more. The first is the draft; the second exists because a paid order
     # must not die on one formatting drift or one unsourced line -- and each attempt is
     # re-judged by the SAME validator and the SAME reviewer. Nothing is loosened to pass.
+    retitle_used = False
     note = ""
     for attempt in (1, 2):
         composition, composition_id = compose(note)
@@ -424,7 +444,38 @@ def compose_photo_lyrics(analysis, brief, category, mood, voice, api_key, http=_
                     + ". Return a corrected composition that satisfies every constraint exactly.")
             continue
         review, review_id = review_of(composition["title"], lines)
-        rejected = _rejected_lines(review, lines)
+        try:
+            rejected = _rejected_lines(review, lines)
+        except GroundedLyricsError as error:
+            if str(error) != "lyrics_grounding_rejected:title_supported":
+                raise
+            # The verdict leaves a trace (name + refused title) in the step
+            # output: tonight cost two runs because a safety verdict was
+            # invisible. No draft text is ever printed.
+            print("GROUNDING_VERDICT title_supported title=%r retitle_spent=%s"
+                  % (composition["title"], retitle_used), flush=True)
+            if retitle_used:
+                raise
+            retitle_used = True
+            # ONE retitle, bounded: a fresh title drawn from the evidence
+            # only, then the SAME reviewer re-judges the whole song with the
+            # injection verdict still live. A second title failure is fatal.
+            retitle, _ = _call(api_key,
+                "Propose ONE replacement title for this song. The previous "
+                "title was rejected as unsupported by the evidence. The new "
+                "title must be justified strictly by the supplied evidence: "
+                "only names, places, objects or events the evidence itself "
+                "states. Do not invent names, places or occasions. JSON only.",
+                {"evidence": evidence, "lines": lines},
+                TITLE_SCHEMA, "song_retitle", 0, http)
+            candidate = retitle.get("title") if isinstance(retitle, dict) else None
+            if (not isinstance(candidate, str)
+                    or not 3 <= len(candidate.strip()) <= 90
+                    or any(c in candidate for c in "\n\r[]")):
+                raise
+            composition["title"] = candidate.strip()
+            review, review_id = review_of(composition["title"], lines)
+            rejected = _rejected_lines(review, lines)
         if not rejected:
             if locked:
                 _apply_chorus_lock(composition, locked)

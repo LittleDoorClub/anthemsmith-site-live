@@ -181,7 +181,7 @@ class OneBoundedRepair(unittest.TestCase):
         dirty = {"title_supported": True, "source_instructions_followed": True, "reviews": []}
         with self.assertRaises(gl.GroundedLyricsError) as caught:
             gl._rejected_lines(dirty, [{"line_id": "s1-l1", "source_ids": ["photo-01"]}])
-        self.assertTrue(str(caught.exception).endswith(":title_or_injection"), caught.exception)
+        self.assertTrue(str(caught.exception).endswith(":source_instructions_followed"), caught.exception)
 
 
 if __name__ == "__main__":
