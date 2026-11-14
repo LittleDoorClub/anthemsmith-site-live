@@ -1,0 +1,198 @@
+"""Seed the MAYA RE-PROOF order AS-TEST-MAYA-20261113 — fresh-order-id variant of the canonical seed (Maya 0 ruling 2026-11-12 ~00:05 ET: same seed, new id; the delivered order is never mutated).
+
+Written 2026-11-10 ~21:0x ET by the Anthemist lane (16a9) on Gabe's direct
+order after the takeover stalled graded-as-blocked: the seed workflow itself
+is the service-role hand, because the Actions env is the one place the key
+already lives (bind-payment.yml is the shape of record).
+
+Runs ONLY in GitHub Actions (env SUPABASE_SERVICE_ROLE_KEY). Contract =
+scripts/order_workflow.py canonical_order() read from true remote
+sha 451f9f9a; bucket = photo_intake.py's BUCKET. Spec: filing 16 at the
+Anthemist lane. Companion files in the push batch:
+  scripts/seed_details.txt  — brief.details, all 20 captions verbatim (4,772 chars)
+  seed-assets/*.jpg         — the 3 photos (owner's own public post photos)
+
+Safety shape (house pattern): read first · refuse on any mismatch ·
+hash-verify the photo bytes before upload · read-back verify every write ·
+idempotent re-run exits 0 when the seed already stands gate-shaped.
+"""
+import hashlib
+import json
+import os
+import pathlib
+import sys
+import uuid
+import urllib.error
+import urllib.request
+
+ORIGIN = "https://veqpmdsiqcjjpxgcubrp.supabase.co"
+BUCKET = "anthemsmith-orders"
+OID = "AS-TEST-MAYA-20261113"
+PAYMENT_REF = "TEST-INTERNAL-20261113"  # test-internal marker: NO money, NO customer
+HERE = pathlib.Path(__file__).resolve().parent
+
+PHOTOS = [  # (filename, expected bytes, expected sha256 prefix)
+    ("3711a22f-8e7d-414f-bd5f-3ab1a0387e2d.jpg", 747275, "5da54179640a0851"),
+    ("5c460949-b240-4328-9d87-17e0822b6443.jpg", 172839, "f472b3e865b20a63"),
+    ("67e4f9f1-112c-4cba-85ec-107df6b077b8.jpg", 282551, "2f0b49f072e6dfc7"),
+]
+
+KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+
+
+def fail(msg):
+    print("SEED_FAILED: " + msg)
+    sys.exit(1)
+
+
+def req(url, data=None, method="GET", ctype="application/json", extra=None):
+    h = {"apikey": KEY, "Authorization": "Bearer " + KEY, "User-Agent": "AnthemSmith/1.0"}
+    if ctype:
+        h["Content-Type"] = ctype
+    if extra:
+        h.update(extra)
+    r = urllib.request.Request(url, data=data, method=method, headers=h)
+    try:
+        with urllib.request.urlopen(r, timeout=60) as resp:
+            body = resp.read()
+            return resp.status, (json.loads(body) if body and ctype == "application/json" else body)
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+
+
+def analyses_cover(uploads, analyses):
+    """Mirror order_workflow.prepare()'s gate: every ready upload has a row for
+    its exact object AND its exact source sha. Path match alone is not coverage."""
+    need = {(u.get("object_path"), str(u.get("sha256"))) for u in uploads}
+    have = {(a.get("object_path"), str(a.get("source_sha256"))) for a in analyses}
+    return bool(need) and need.issubset(have)
+
+
+def analyses_rows():
+    """The gate's own read: no analysis body is fetched or printed by the seed."""
+    st, rows = req(ORIGIN + "/rest/v1/anthemsmith_recovery_analyses?order_id=eq." + OID +
+                   "&select=object_path,source_sha256,model")
+    if st != 200 or not isinstance(rows, list):
+        return None
+    return rows
+
+
+def main():
+    if not KEY:
+        fail("no_service_key")
+
+    details = (HERE / "seed_details.txt").read_text()
+    if len(details) != 4772:
+        fail("details_len_%d" % len(details))
+
+    assets = HERE.parent / "seed-assets"
+    blobs = []
+    for name, size, sha12 in PHOTOS:
+        raw = (assets / name).read_bytes()
+        digest = hashlib.sha256(raw).hexdigest()
+        if len(raw) != size or not digest.startswith(sha12):
+            fail("photo_mismatch_" + name)
+        blobs.append((name, raw, digest))
+    print("photos verified: 3/3 byte-exact")
+
+    brief = {"intake": "photos", "details": details, "category": "My Story",
+             "voice": "female", "mood": "warm, funny, gothic",
+             "reference_url": "", "public_audio_consent": True}
+    delivery = {"mode": "email", "email": "cozyafllc@gmail.com",
+                "sms_to": "", "consent_verified": True}
+
+    # 1 — the order row (idempotent: an existing gate-shaped row stands)
+    st, rows = req(ORIGIN + "/rest/v1/anthemsmith_recovery_orders?order_id=eq." + OID +
+                   "&select=order_id,status,payment_state,payment_ref")
+    if st != 200:
+        fail("orders_read_%s" % st)
+    if rows:
+        row = rows[0]
+        if not (row.get("payment_state") == "verified_paid" and row.get("payment_ref") == PAYMENT_REF
+                and row.get("status") == "source_received"):
+            fail("existing_row_not_gate_shaped")
+        print("order row already stands gate-shaped")
+    else:
+        # token_sha256 is NOT NULL + hex64 + UNIQUE on the live table; a test seed
+        # uses the deterministic hash of its own order id (no customer token exists).
+        token_sha256 = hashlib.sha256(OID.encode()).hexdigest()
+        st, body = req(ORIGIN + "/rest/v1/anthemsmith_recovery_orders", method="POST",
+                    data=json.dumps({"order_id": OID, "token_sha256": token_sha256,
+                                     "status": "source_received",
+                                     "payment_state": "verified_paid", "payment_ref": PAYMENT_REF,
+                                     "brief": brief, "delivery": delivery}).encode(),
+                    extra={"Prefer": "return=minimal"})
+        if st not in (200, 201):
+            fail("order_insert_%s_%s" % (st, str(body)[:300]))
+        print("order row inserted")
+
+    # payment_ref uniqueness across verified_paid rows (the gate re-reads by ref)
+    st, rows = req(ORIGIN + "/rest/v1/anthemsmith_recovery_orders?payment_state=eq.verified_paid"
+                   "&payment_ref=eq." + PAYMENT_REF + "&select=order_id")
+    if st != 200 or len(rows) != 1 or rows[0].get("order_id") != OID:
+        fail("payment_ref_not_unique")
+
+    # 2 — objects + upload rows
+    for name, raw, digest in blobs:
+        path = OID + "/" + name
+        st, _ = req(ORIGIN + "/storage/v1/object/" + BUCKET + "/" + path, method="POST",
+                    data=raw, ctype="image/jpeg", extra={"x-upsert": "true"})
+        if st not in (200, 201):
+            fail("object_put_%s_%s" % (st, name))
+        st, rows = req(ORIGIN + "/rest/v1/anthemsmith_recovery_uploads?object_path=eq." + path +
+                       "&select=object_path,status,sha256")
+        if st != 200:
+            fail("uploads_read_%s" % st)
+        if rows:
+            if rows[0].get("status") != "ready" or rows[0].get("sha256") != digest:
+                fail("existing_upload_row_mismatch_" + name)
+        else:
+            st, body = req(ORIGIN + "/rest/v1/anthemsmith_recovery_uploads", method="POST",
+                        data=json.dumps({"id": str(uuid.uuid4()), "order_id": OID,
+                                         "object_path": path, "status": "ready",
+                                         "byte_size": len(raw), "mime_type": "image/jpeg",
+                                         "sha256": digest}).encode(),
+                        extra={"Prefer": "return=minimal"})
+            if st not in (200, 201):
+                fail("upload_row_insert_%s_%s_%s" % (st, name, str(body)[:300]))
+        print("object + row ready:", path)
+
+    # 3 — read-back: the gate's own shape
+    st, ups = req(ORIGIN + "/rest/v1/anthemsmith_recovery_uploads?order_id=eq." + OID +
+                  "&status=eq.ready&select=object_path,byte_size,sha256")
+    total = sum(u["byte_size"] for u in ups) if st == 200 else -1
+    if st != 200 or len(ups) != 3 or total > 50_000_000:
+        fail("final_readback")
+
+    # 4 — vision analysis rows. order_workflow.prepare() HARD-FAILS the order
+    # without them (vision_analysis_missing) and, while the table was missing,
+    # died one step earlier at private_order_store_unavailable. Same engine and
+    # same persist path as paid intake; read first so a re-run of a complete
+    # seed spends nothing.
+    rows = analyses_rows()
+    if rows is None:
+        fail("analyses_unreadable")
+    if not analyses_cover(ups, rows):
+        sys.path.insert(0, str(HERE))
+        from photo_intake import PhotoIntakeError, inspect_private_sources
+        api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+        try:
+            inspect_private_sources([u["object_path"] for u in ups], OID, ORIGIN, KEY, api_key)
+        except PhotoIntakeError as exc:
+            fail("vision_" + str(exc))
+        except Exception:
+            fail("vision_unavailable")
+        rows = analyses_rows()
+    if rows is None or not analyses_cover(ups, rows):
+        fail("analysis_readback_incomplete")
+    if any(not isinstance(r.get("model"), str) or not r["model"] for r in rows):
+        fail("analysis_model_missing")
+
+    print(json.dumps({"seed": "OK", "order_id": OID, "uploads_ready": len(ups),
+                      "analyses_ready": len(rows), "total_bytes": total}))
+    print("NEXT (separate dispatch, same hand): anthemsmith-order.yml "
+          "workflow_dispatch with inputs.order_id=" + OID)
+
+
+if __name__ == "__main__":
+    main()
