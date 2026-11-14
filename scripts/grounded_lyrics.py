@@ -171,6 +171,22 @@ def _verdict_trip(review, check_title=True):
     return None
 
 
+def _title_fatal_token(title, retitle_spent):
+    """The fatal title token, carrying content-free verdict facts.
+
+    The worker wrapper forwards only code-shaped failure tokens -- never the
+    child's stdout/stderr, which may quote source material -- so the trace a
+    held run leaves IS this token. It names which title died by sha256 prefix
+    and whether the one bounded retitle was already spent. No title text, no
+    source material, ever rides it. Segments stay inside the wrapper's
+    code-shape door (lowercase code segments, colon-separated).
+    """
+    digest = hashlib.sha256(str(title).encode("utf-8")).hexdigest()[:8]
+    return ("lyrics_grounding_rejected:title_supported:"
+            + ("retitle_spent" if retitle_spent else "retitle_fresh")
+            + ":t_" + digest)
+
+
 def _rejected_lines(review, lines, check_title=True):
     """Validate the review envelope, then return the line_ids it refused.
 
@@ -449,13 +465,18 @@ def compose_photo_lyrics(analysis, brief, category, mood, voice, api_key, http=_
         except GroundedLyricsError as error:
             if str(error) != "lyrics_grounding_rejected:title_supported":
                 raise
-            # The verdict leaves a trace (name + refused title) in the step
-            # output: tonight cost two runs because a safety verdict was
-            # invisible. No draft text is ever printed.
+            # The verdict leaves a trace in the step output for a local run.
+            # In the deployed worker the wrapper discards child stdout/stderr
+            # by design (it may quote source material), so the trace that
+            # survives a held run is the failure TOKEN itself -- which is why
+            # the fatal raises below carry the verdict facts in code shape
+            # (_title_fatal_token). Run 43550242522 died with neither visible:
+            # the print went to a discarded pipe and the raise was bare.
             print("GROUNDING_VERDICT title_supported title=%r retitle_spent=%s"
                   % (composition["title"], retitle_used), flush=True)
             if retitle_used:
-                raise
+                raise GroundedLyricsError(
+                    _title_fatal_token(composition["title"], True))
             retitle_used = True
             # ONE retitle, bounded: a fresh title drawn from the evidence
             # only, then the SAME reviewer re-judges the whole song with the
@@ -475,7 +496,31 @@ def compose_photo_lyrics(analysis, brief, category, mood, voice, api_key, http=_
                 raise
             composition["title"] = candidate.strip()
             review, review_id = review_of(composition["title"], lines)
-            rejected = _rejected_lines(review, lines)
+            rejected = []
+            title_dead = False
+            try:
+                rejected = _rejected_lines(review, lines)
+            except GroundedLyricsError as title_error:
+                if str(title_error) != "lyrics_grounding_rejected:title_supported":
+                    raise
+                if attempt == 2:
+                    raise GroundedLyricsError(
+                        _title_fatal_token(composition["title"], True))
+                # Attempt 1, and the retitle's candidate ALSO failed the
+                # title verdict. Dying here wastes the second draft the loop
+                # already owns: end this attempt like any other attempt-1
+                # rejection, with the title failure named in the note, and
+                # let attempt 2 compose fresh. The retitle budget stays
+                # spent -- exactly one retitle call per run, unchanged --
+                # and a title trip on attempt 2 is fatal, in code shape.
+                note = (" Your previous draft was rejected: its title, and the "
+                        "replacement title proposed for it, were both judged "
+                        "unsupported by the evidence. The new title must use "
+                        "only names, places, objects or events the evidence "
+                        "itself states. Return the whole composition JSON.")
+                title_dead = True
+            if title_dead:
+                continue
         if not rejected:
             if locked:
                 _apply_chorus_lock(composition, locked)

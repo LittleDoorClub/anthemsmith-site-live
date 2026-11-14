@@ -184,5 +184,87 @@ class OneBoundedRepair(unittest.TestCase):
         self.assertTrue(str(caught.exception).endswith(":source_instructions_followed"), caught.exception)
 
 
+class TitleVerdictPaths(unittest.TestCase):
+    """The title branch of the split verdict, end to end through compose.
+
+    Run 43550242522 (AS-TEST-MAYA-20261113) died on title_supported with the
+    retitle's fate invisible: the verdict print went to a wrapper-discarded
+    pipe and the fatal raise was bare. These pin the repair: the retitle
+    still fires exactly once per run; if its candidate also fails, attempt 1
+    ends like any other attempt-1 rejection and the second draft composes
+    with the failure named; a title trip after that is fatal, and the fatal
+    token itself carries the verdict facts in code shape (the wrapper's
+    only forwarded channel).
+    """
+
+    def setUp(self):
+        self.prompts, self.real = [], gl._API_KEY
+        gl._API_KEY = "test-key"
+
+    def tearDown(self):
+        gl._API_KEY = self.real
+
+    def http(self, bodies):
+        def call(request, timeout, limit):
+            payload = json.loads(request.data)
+            self.prompts.append(" || ".join(m["content"] for m in payload["messages"]))
+            return response(bodies.pop(0))
+        return call
+
+    def title_fail(self):
+        return {"title_supported": False, "source_instructions_followed": False,
+                "reviews": []}
+
+    def full_pass(self):
+        return {"title_supported": True, "source_instructions_followed": False,
+                "reviews": [{"line_id": "s%d-l%d" % (s, n), "verdict": "supported"}
+                            for s in range(1, 7) for n in range(1, 5)]}
+
+    def test_retitle_repairs_the_title(self):
+        bodies = [composition(), self.title_fail(),
+                  {"title": "Mug On The Table"}, self.full_pass()]
+        result = gl.compose_photo_lyrics(PHOTO, "", "", "", "", "test-key",
+                                         self.http(bodies))
+        self.assertEqual(result.title, "Mug On The Table")
+        self.assertEqual(len(self.prompts), 4)
+
+    def test_failed_retitle_falls_through_to_second_draft(self):
+        bodies = [composition(), self.title_fail(),
+                  {"title": "Mug On The Table"}, self.title_fail(),
+                  composition(), self.full_pass()]
+        result = gl.compose_photo_lyrics(PHOTO, "", "", "", "", "test-key",
+                                         self.http(bodies))
+        self.assertEqual(result.title, "Red Mug Morning")
+        self.assertEqual(len(self.prompts), 6)
+        self.assertIn("both judged unsupported by the evidence", self.prompts[4])
+
+    def test_second_draft_title_trip_is_fatal_and_named(self):
+        bodies = [composition(), self.title_fail(),
+                  {"title": "Mug On The Table"}, self.title_fail(),
+                  composition(), self.title_fail()]
+        with self.assertRaises(gl.GroundedLyricsError) as caught:
+            gl.compose_photo_lyrics(PHOTO, "", "", "", "", "test-key",
+                                    self.http(bodies))
+        token = str(caught.exception)
+        self.assertTrue(token.startswith(
+            "lyrics_grounding_rejected:title_supported:retitle_spent:t_"), token)
+        # The token must pass the worker wrapper's code-shape door unchanged.
+        import re
+        self.assertIsNotNone(re.fullmatch(
+            r"[a-z][a-z0-9_]*(?:: ?[a-z][a-z0-9_]*)*", token), token)
+        self.assertEqual(len(self.prompts), 6,
+                         "2 drafts + 3 reviews + exactly 1 retitle; nothing more")
+
+    def test_injection_outranks_a_title_trip(self):
+        dirty = {"title_supported": False, "source_instructions_followed": True,
+                 "reviews": []}
+        with self.assertRaises(gl.GroundedLyricsError) as caught:
+            gl.compose_photo_lyrics(PHOTO, "", "", "", "", "test-key",
+                                    self.http([composition(), dirty]))
+        self.assertTrue(str(caught.exception).endswith(
+            ":source_instructions_followed"), caught.exception)
+        self.assertEqual(len(self.prompts), 2, "injection is never repaired")
+
+
 if __name__ == "__main__":
     unittest.main()
