@@ -22,7 +22,15 @@ export function parseCapability(hash) {
 }
 
 async function readBounded(response, limit) {
-  const length = response.headers.get('Content-Length');
+  // A browser's fetch transparently decodes Content-Encoding: the body
+  // reader yields the decoded bytes while Content-Length still counts the
+  // encoded wire bytes, so the header can only be checked against the
+  // stream when the response is unencoded. The streamed byte count below
+  // remains the bound either way, and loadAudio still verifies the audio
+  // byte count against the manifest's declared size.
+  const encoding = response.headers.get('Content-Encoding');
+  const length = (!encoding || encoding.trim().toLowerCase() === 'identity')
+    ? response.headers.get('Content-Length') : null;
   if (length !== null && (!/^\d+$/.test(length) || Number(length) > limit)) {
     await response.body?.cancel();
     throw new Error('audio_unavailable');
