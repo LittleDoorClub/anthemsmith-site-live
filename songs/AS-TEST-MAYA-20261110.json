@@ -1,0 +1,51 @@
+{
+ "order_id": "AS-TEST-MAYA-20261110",
+ "status": "audio_ready",
+ "handle": "cozyafsweatshop",
+ "category": "My Story",
+ "display_name": "Maya the Maker🫀",
+ "title": "AnthemSmith AS-TEST-MAYA-20261110",
+ "grounded_photo_lyrics": false,
+ "duration_full": 209.88,
+ "model": "V6",
+ "heart_anchor": "For a desk with a dark side.\nThe Librarian's Backbone, handmade in Ybor City. 🫀\nReal spine. Real shade. Warm light for late pages.\nNow living on cozyafsweatshop.com.\n\nTell me what you are reading by lamplight tonight.\n\n#GothicDecor #DarkHome #HandmadeLamp #YborCity #CozyAF #SkeletonLamp #DarkAcademia",
+ "heart_anchor_source": "ig-caption",
+ "reference": null,
+ "sources": {
+  "bio": true,
+  "captions_used": 11,
+  "alts_seen": 12,
+  "alt_lines_used": 0,
+  "details": true,
+  "anchor_source": "ig-caption",
+  "photos_analyzed": 0,
+  "photo_analysis_complete": false,
+  "photo_observation_is_customer_quote": null,
+  "render_status": "posts",
+  "render_chrome": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+ },
+ "ingest_note": "",
+ "duration_full_superseded": 210.48,
+ "keeper": {
+  "take": "take2",
+  "file": "AS-TEST-MAYA-20261110-t2-full.mp3",
+  "sha256": "c915799420bcf9cfe63270d4ad1b3096d0760a08c1f7d3d7520588aa984fdddd",
+  "duration": 209.88,
+  "decided_by": "gforce-ox dna4 1c31",
+  "decided_at": "2026-11-16T04:09:34-05:00",
+  "adopted_by": "gforce-ox dna4 1c31",
+  "adopted_at": "2026-11-16T04:51:51-05:00",
+  "qc_tool": "scripts/qc_take_lyrics.py",
+  "takes_manifest": "AS-TEST-MAYA-20261110.takes.json"
+ },
+ "hook": {
+  "file": "AS-TEST-MAYA-20261110.mp3",
+  "seconds": 30,
+  "start_seconds": 136,
+  "duration": 30.02,
+  "sha256": "c21b9140bd07bb111631dc69ca42b6a71eb594472ea7c7ca6e16d030a1157776",
+  "derived_from": "AS-TEST-MAYA-20261110-t2-full.mp3",
+  "rule": "start = max(0, int(duration*0.72) - 15)  # forge_order.py hook rule"
+ },
+ "needs_private_ingest": true
+}
