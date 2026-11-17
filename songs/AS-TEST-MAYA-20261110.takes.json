@@ -1,0 +1,52 @@
+{
+ "take2_rid": "a84e584b-3885-4500-bbbd-46e8d051936b",
+ "take2_url": "https://cdn.muapi.ai/outputs/generated/a84e584b-3885-4500-bbbd-46e8d051936b_66fa295e.mp3",
+ "take2_duration": 209.88,
+ "take1_duration": 210.48,
+ "keeper": "take2",
+ "keeper_file": "AS-TEST-MAYA-20261110-t2-full.mp3",
+ "keeper_sha256": "c915799420bcf9cfe63270d4ad1b3096d0760a08c1f7d3d7520588aa984fdddd",
+ "keeper_duration": 209.88,
+ "alternate": {
+  "take": "take1",
+  "file": "AS-TEST-MAYA-20261110-full.mp3",
+  "sha256": "ec46f930bf44f28dd68865e8ef235c8545185d9ed3b1e8fefa8d6833002e36b5",
+  "duration": 210.48
+ },
+ "keeper_decided_at": "2026-11-16T04:09:34-05:00",
+ "keeper_decided_by": "gforce-ox dna4 1c31",
+ "keeper_criteria": "verbatim anchor-line coverage (15/19 lyric units >=0.72 vs 11/19); all 4 anchor-critical lines present (desk with a dark side 0.98 / librarian's backbone handmade in Ybor City 0.97 / real spine real shade warm light for late pages 0.92 / now living on cozyafsweatshop.com 0.72) vs take1 failing 2 of 4 (0.43, 0.38); safer true peak -1.1 dBFS vs -0.3 dBFS",
+ "keeper_evidence": "faster-whisper small.en transcripts + ffmpeg ebur128, run 2026-11-16; transcripts cache/scratch/as_maya_transcripts.json",
+ "qc_repro": {
+  "tool": "scripts/qc_take_lyrics.py",
+  "tool_sha12": "50250b9f9db3",
+  "transcripts": "C:\\Users\\Owner\\AppData\\Local\\hermes\\profiles\\gforce-ox\\cache\\scratch\\as_maya_transcripts.json",
+  "transcripts_sha12": "c3e0c2328705",
+  "ran_at": "2026-11-16T04:55:00-05:00",
+  "ran_by": "gforce-ox dna4 1c31",
+  "keeper": "take2",
+  "ranking": [
+   "take2",
+   "take1"
+  ],
+  "takes": {
+   "take1": {
+    "units_total": 26,
+    "units_hit": 9,
+    "coverage": 0.346,
+    "anchor_hit": 2,
+    "anchor_total": 5,
+    "anchor_min": 0.0
+   },
+   "take2": {
+    "units_total": 26,
+    "units_hit": 13,
+    "coverage": 0.5,
+    "anchor_hit": 3,
+    "anchor_total": 5,
+    "anchor_min": 0.444
+   }
+  },
+  "note": "Authority is this tool output. keeper_criteria above is the earlier ad-hoc tally (19 singable units, 4 anchor lines) written before the tool was committed; it agrees on keeper and ranking but its denominators differ (26 units, 5 anchor lines here)."
+ }
+}
