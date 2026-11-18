@@ -37,13 +37,15 @@ function element(tag = 'div') {
   };
 }
 
-// Boot the real app.js with the flag forced to the state under test.
-function boot(flag) {
+// Boot the real app.js with the flag (and optional checkout config) forced to the state under test.
+function boot(flag, checkoutUrl = '') {
   let matched = false;
-  const code = source.replace(/const AS_ORDERING_PAUSED=(?:true|false);/, () => {
-    matched = true;
-    return `const AS_ORDERING_PAUSED=${flag};`;
-  });
+  const code = source
+    .replace(/const AS_ORDERING_PAUSED=(?:true|false);/, () => {
+      matched = true;
+      return `const AS_ORDERING_PAUSED=${flag};`;
+    })
+    .replace(/const AS_CHECKOUT_URL='[^']*';/, `const AS_CHECKOUT_URL='${checkoutUrl}';`);
   assert.ok(matched, 'flag substitution did not match app.js');
   const nodes = new Map();
   const node = selector => { if (!nodes.has(selector)) nodes.set(selector, element()); return nodes.get(selector); };
@@ -125,6 +127,43 @@ test('control: with the flag off the same click does open the form and enable su
   assert.equal(h.form.hidden, false, 'unpaused CTA failed to open the form');
   assert.equal(h.submit.disabled, false, 'unpaused CTA failed to enable submit');
   assert.equal(h.submit.textContent, 'Get your song', 'unpaused submit label unchanged');
+});
+
+// Containment: the retired hard-coded payment link must not survive in the shipped bundle.
+test('bundle: no hard-coded Stripe payment link ships in app.js', () => {
+  assert.doesNotMatch(source, /https:\/\/buy\.stripe\.com\/[A-Za-z0-9]{6,}/, 'a hard-coded Stripe payment link is back in app.js');
+  assert.match(source, /const AS_CHECKOUT_URL='[^']*';/, 'checkout destination is not a single configurable constant');
+});
+
+// Fail closed: unpaused but with no live checkout configured, the submit path must not render a link.
+test('unpaused without a configured checkout fails closed to the paused/recovery panel', async () => {
+  const h = boot(false);
   await h.sandbox.submitInstant();
-  assert.match(h.payment.innerHTML, /buy\.stripe\.com/, 'unpaused submit path never reached checkout');
+  assert.doesNotMatch(h.payment.innerHTML, /stripe\.com/, 'unconfigured checkout still rendered a payable link');
+  assert.match(h.brief.innerHTML, /temporarily paused/i, 'unconfigured checkout did not fall back to the recovery panel');
+  assert.equal(h.sandbox.sessionStorage.getItem('anthemsmith_order'), null, 'unconfigured checkout still started an order');
+});
+
+// Recovery path: a live, allowlisted checkout URL is the only way back to a payable panel.
+test('configured live checkout renders a validated link carrying the order id', async () => {
+  const h = boot(false, 'https://buy.stripe.com/00g000000000000000');
+  await h.sandbox.submitInstant();
+  const pay = h.payment.innerHTML;
+  assert.match(pay, /https:\/\/buy\.stripe\.com\/00g000000000000000\?client_reference_id=AS-[A-Z0-9-]+/, 'configured checkout did not render the validated pay link');
+  assert.match(pay, /Pay \$5 with Card/, 'configured checkout lost its price label');
+});
+
+// No open redirect: a non-Stripe configured URL is refused and the order fails closed.
+test('configured checkout on a foreign host is refused', async () => {
+  const h = boot(false, 'https://evil.example.com/pay');
+  await h.sandbox.submitInstant();
+  assert.doesNotMatch(h.payment.innerHTML, /evil\.example\.com/, 'foreign-host checkout reached the payment panel');
+  assert.match(h.brief.innerHTML, /temporarily paused/i, 'foreign-host checkout did not fail closed');
+});
+
+// The pause outranks a configured link: both guards must agree.
+test('paused outranks a configured live checkout', async () => {
+  const h = boot(true, 'https://buy.stripe.com/00g000000000000000');
+  await h.sandbox.submitInstant();
+  assert.doesNotMatch(h.payment.innerHTML, /stripe\.com/, 'paused flag was bypassed by a configured checkout');
 });

@@ -10,6 +10,28 @@ const AS_EMAIL='cozyafllc@gmail.com';
 // Incident AS-MUIJ11B6: stop new purchases while uploads and delivery are repaired.
 // This is containment, not a substitute for server-side payment and source gates.
 const AS_ORDERING_PAUSED=true;
+
+// Checkout destination is CONFIGURATION, never a literal in the shipped bundle.
+// The retired hard-coded $5 Stripe link is removed: empty means "no live checkout",
+// and every order path then fails closed to the paused/recovery panel instead of
+// handing a customer a dead payment link. Recovery = set AS_CHECKOUT_URL to a live
+// https Stripe checkout URL on the allowlisted host and AS_ORDERING_PAUSED=false.
+const AS_CHECKOUT_URL='';
+const AS_CHECKOUT_PRICE='$5';
+const AS_CHECKOUT_HOSTS=['buy.stripe.com','checkout.stripe.com'];
+function checkoutBase(){
+ const base=String(AS_CHECKOUT_URL||'').trim();
+ if(!base)return null;
+ let u;try{u=new URL(base)}catch(e){return null}
+ if(u.protocol!=='https:'||AS_CHECKOUT_HOSTS.indexOf(u.hostname)<0)return null;
+ return u;
+}
+function checkoutURL(oid){
+ const u=checkoutBase();
+ if(!u)return '';
+ u.searchParams.set('client_reference_id',String(oid||''));
+ return u.toString();
+}
 function showOrderingPaused(){
  const box=$('#brief');if(!box)return;
  box.hidden=false;
@@ -243,11 +265,13 @@ function renderExistingSong(id,box,receipt,isCurrent){
 }
 async function fireOrder(data){
  if(AS_ORDERING_PAUSED){showOrderingPaused();return}
+ const oid=data&&typeof data.request_id==='string'?data.request_id:'';
+ const payLink=checkoutURL(oid);
+ // Fail closed: no configured, validated checkout means no order starts and no link renders.
+ if(!payLink){showOrderingPaused();return}
  sessionStorage.setItem('anthemsmith_order',JSON.stringify(data));
- const oid=data.request_id;
- const payLink='https://buy.stripe.com/6oU5kE4LT9Md16lbzu14402?client_reference_id='+oid;
  const panel=$('#payment');panel.hidden=false;
- panel.innerHTML='<h2>Your order: '+oid+'</h2><p>Song type: '+data.category+' | Voice: '+data.voice+' | $5</p><p><a href=\"'+payLink+'\" target=\"_blank\" class=\"primary\" style=\"display:inline-block;padding:12px 24px;background:#635bff;color:#fff;border-radius:6px;text-decoration:none;font-weight:bold\">Pay $5 with Card</a></p><p class=\"small\">After paying, return to this page to check your order status.</p><p class=\"small\">Your order ID: <code>'+oid+'</code> — save this.</p>';
+ panel.innerHTML='<h2>Your order: '+oid+'</h2><p>Song type: '+data.category+' | Voice: '+data.voice+' | '+AS_CHECKOUT_PRICE+'</p><p><a href="'+payLink+'" target="_blank" class="primary" style="display:inline-block;padding:12px 24px;background:#635bff;color:#fff;border-radius:6px;text-decoration:none;font-weight:bold">Pay '+AS_CHECKOUT_PRICE+' with Card</a></p><p class="small">After paying, return to this page to check your order status.</p><p class="small">Your order ID: <code>'+oid+'</code> — save this.</p>';
  panel.scrollIntoView({block:'start',behavior:'smooth'});
 }
 function watchOrder(id,box,tries){
@@ -297,6 +321,9 @@ async function submitInstant(){
  const form=$('#songForm');
  if(!form.checkValidity()){form.reportValidity();return}
  if(AS_ORDERING_PAUSED){showOrderingPaused();return}
+ // Containment: with no configured live checkout there is nothing payable to send anyone to,
+ // so stop before intake uploads rather than after.
+ if(!checkoutBase()){showOrderingPaused();return}
  const data=requestData();
  const panel=$('#payment');panel.hidden=false;
  const held=await ensureIntakeSources(data,msg=>{panel.innerHTML='<p>'+msg+'</p>'});
