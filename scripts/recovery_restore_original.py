@@ -1,7 +1,8 @@
-"""Restore ONLY AS-MUIJ11B6's lost private brief/contact from its original job.
+"""Restore the configured recovery order’s private brief/contact from its pinned original job.
 No payment verification, token issue, customer send, or generation is authorized here.
 GitHub credentials never follow a cross-origin log redirect; no log contents printed.
 """
+from legacy_recovery_settings import required_order_id, required_setting
 import hashlib
 import json
 import os
@@ -15,9 +16,6 @@ import urllib.request
 
 ORIGIN = 'https://veqpmdsiqcjjpxgcubrp.supabase.co'
 REPO = 'LittleDoorClub/anthemsmith-site-live'
-ORDER = 'AS-MUIJ11B6'
-RUN = 36253190570
-JOB = 108434955217
 TABLE = 'anthemsmith_recovery_orders'
 
 class RecoveryError(Exception): pass
@@ -27,6 +25,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def parse_original(raw):
+    ORDER = required_order_id()
     if len(raw) > 5 * 1024 * 1024:
         raise RecoveryError('original_log_too_large')
     text = raw.decode('utf-8', errors='strict')
@@ -45,13 +44,14 @@ def parse_original(raw):
     if not re.fullmatch(r'\+[1-9]\d{7,14}', phone):
         raise RecoveryError('original_recipient_invalid')
     # Verified incident discriminator: later retry contains a different suffix.
-    if not phone.endswith('6352'):
+    if not phone.endswith(required_setting('ANTHEMSMITH_LEGACY_CONTACT_SUFFIX', r'[0-9]{4}')):
         raise RecoveryError('not_the_original_checkout_recipient')
     if fields.get('EMAIL') or fields.get('IG_URL') or fields.get('DETAILS') or fields.get('REFERENCE_URL'):
         raise RecoveryError('original_source_evidence_changed')
     if not fields.get('CATEGORY') or not fields.get('VOICE'):
         raise RecoveryError('original_preferences_missing')
-    source = {'run_id': RUN, 'job_id': JOB, 'log_sha256': hashlib.sha256(raw).hexdigest()}
+    run, job = original_source_ids()
+    source = {'run_id': run, 'job_id': job, 'log_sha256': hashlib.sha256(raw).hexdigest()}
     brief = {'intake': 'photos', 'category': fields['CATEGORY'], 'mood': fields.get('MOOD', ''),
              'voice': fields['VOICE'], 'details': '', 'ig_url': '', 'ig_url2': '', 'reference_url': '',
              'recovery_evidence': source}
@@ -60,7 +60,14 @@ def parse_original(raw):
     return brief, delivery
 
 
+def original_source_ids():
+    run = required_setting('ANTHEMSMITH_LEGACY_RUN_ID', r'[1-9][0-9]{0,19}')
+    job = required_setting('ANTHEMSMITH_LEGACY_JOB_ID', r'[1-9][0-9]{0,19}')
+    return int(run), int(job)
+
+
 def original_log():
+    RUN, JOB = original_source_ids()
     token = os.environ['GH_TOKEN']
     headers = {'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github+json',
                'User-Agent': 'AnthemSmith/1.0', 'Cache-Control': 'no-cache'}
@@ -101,6 +108,7 @@ def rest(params, body=None):
 
 
 def restore(raw, db=rest):
+    ORDER = required_order_id()
     brief, delivery = parse_original(raw)
     query = {'order_id': 'eq.' + ORDER, 'select': 'order_id,status,payment_state,payment_ref,brief,delivery', 'limit': '2'}
     rows = db(query)
@@ -110,7 +118,7 @@ def restore(raw, db=rest):
     if row.get('payment_state') != 'unverified' or row.get('payment_ref') is not None or row.get('status') != 'awaiting_sources':
         raise RecoveryError('existing_order_changed_review_required')
     if row.get('brief') == brief and row.get('delivery') == delivery:
-        return {'order_id': ORDER, 'result': 'already_restored', 'payment_state': 'unverified',
+        return {'result': 'already_restored', 'payment_state': 'unverified',
                 'consent_verified': False, 'contact_restored': True, 'sent': False}
     if row.get('brief') or row.get('delivery'):
         raise RecoveryError('existing_private_context_conflicts')
@@ -124,13 +132,14 @@ def restore(raw, db=rest):
         raise RecoveryError('context_readback_mismatch')
     if final[0].get('payment_state') != 'unverified' or final[0].get('payment_ref') is not None:
         raise RecoveryError('payment_state_changed')
-    return {'order_id': ORDER, 'result': 'original_private_context_restored',
-            'original_job': JOB, 'log_sha256': hashlib.sha256(raw).hexdigest(),
+    return {'result': 'original_private_context_restored',
             'payment_state': 'unverified', 'consent_verified': False, 'contact_restored': True,
             'token_issued': False, 'sent': False, 'music_generated': False}
 
 
 def main():
+    required_order_id()
+    required_setting('ANTHEMSMITH_LEGACY_CONTACT_SUFFIX', r'[0-9]{4}')
     result = restore(original_log())
     Path('restore-evidence.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
     print(json.dumps(result))

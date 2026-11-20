@@ -5,7 +5,7 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: recovery-restore-AS-MUIJ11B6
+  group: recovery-restore-configured-order
   cancel-in-progress: false
 jobs:
   restore:
@@ -23,6 +23,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ANTHEMSMITH_LEGACY_CONTACT_SUFFIX: ${{ secrets.ANTHEMSMITH_LEGACY_CONTACT_SUFFIX }}
+          ANTHEMSMITH_LEGACY_JOB_ID: ${{ secrets.ANTHEMSMITH_LEGACY_JOB_ID }}
+          ANTHEMSMITH_LEGACY_RUN_ID: ${{ secrets.ANTHEMSMITH_LEGACY_RUN_ID }}
+          ANTHEMSMITH_LEGACY_ORDER_ID: ${{ secrets.ANTHEMSMITH_LEGACY_ORDER_ID }}
         run: python scripts/recovery_restore_original.py
       - uses: actions/upload-artifact@v4
         if: always()

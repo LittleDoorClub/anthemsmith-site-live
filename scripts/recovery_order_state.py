@@ -8,7 +8,7 @@ how many uploads does it have?
 Prints NO phone, NO email, NO brief values, NO token bytes, NO key.
 Any write in this file is a defect.
 """
-import hashlib
+from legacy_recovery_settings import required_order_id, required_setting
 import json
 import os
 import sys
@@ -18,8 +18,6 @@ import urllib.request
 from datetime import datetime, timezone
 
 ORIGIN = 'https://veqpmdsiqcjjpxgcubrp.supabase.co'
-# ORDER_ID lets one read-only run probe any order; default stays the recovery order.
-ORDER = os.environ.get('ORDER_ID') or 'AS-MUIJ11B6'
 TABLE = 'anthemsmith_recovery_orders'
 SELECT = 'order_id,status,payment_state,payment_ref,token_sha256,token_issued_at,expires_at,brief,delivery,delivery_result'
 
@@ -60,8 +58,14 @@ def shape(value):
 
 
 def main():
-    rows = json.loads(get(TABLE, {'order_id': 'eq.' + ORDER, 'select': SELECT, 'limit': '2'}))
-    if len(rows) != 1 or rows[0].get('order_id') != ORDER:
+    if os.environ.get('TEST_ORDER_ID'):
+        order = required_setting('TEST_ORDER_ID', r'AS-TEST-[A-Z0-9-]{1,59}')
+    elif os.environ.get('ORDER_ID'):
+        order = required_setting('ORDER_ID', r'AS-[A-Z0-9-]{1,64}')
+    else:
+        order = required_order_id()
+    rows = json.loads(get(TABLE, {'order_id': 'eq.' + order, 'select': SELECT, 'limit': '2'}))
+    if len(rows) != 1 or rows[0].get('order_id') != order:
         raise StateError('order_row_count_' + str(len(rows)))
     row = rows[0]
     brief = row.get('brief') or {}
@@ -77,34 +81,25 @@ def main():
         except Exception:
             expired = 'unparsed'
     up_raw = get('anthemsmith_recovery_uploads',
-                 {'order_id': 'eq.' + ORDER, 'select': 'object_path,status,sha256,byte_size'})
+                 {'order_id': 'eq.' + order, 'select': 'object_path,status,sha256,byte_size'})
     uploads = json.loads(up_raw)
     state = {
-        'order_id': ORDER,
         'status': row.get('status'),
         'payment_state': row.get('payment_state'),
         'payment_ref_present': row.get('payment_ref') is not None,
-        'brief_keys': sorted(brief.keys()),
         'brief_sources': {k: shape(brief.get(k)) for k in
                           ('ig_url', 'ig_url2', 'reference_url', 'details', 'recovery_evidence')},
-        # sha256 prefix of brief.details only (a hash, never the text): lets a reader
-        # compare the stored brief against a pinned packet without printing content.
-        'brief_details_sha256_12': (hashlib.sha256(brief['details'].encode('utf-8')).hexdigest()[:12]
-                                    if isinstance(brief.get('details'), str) else None),
-        'creative': {k: brief.get(k) for k in ('intake', 'category', 'mood', 'voice')},
         'brief_has_recovery_evidence': bool(brief.get('recovery_evidence')),
         'brief_category_present': bool(brief.get('category')),
         'brief_voice_present': bool(brief.get('voice')),
         'delivery_mode': delivery.get('mode'),
         'delivery_phone_present': bool(phone),
-        'delivery_phone_suffix': phone[-4:] if len(phone) >= 4 else '',
         'delivery_consent_verified': delivery.get('consent_verified'),
-        'delivery_contact_source': delivery.get('contact_source'),
         'token_present': bool(row.get('token_sha256')),
         'token_issued_at': row.get('token_issued_at'),
         'expires_at': expires,
         'token_expired': expired,
-        'delivery_result_keys': sorted(receipt.keys()) if isinstance(receipt, dict) else 'not_object',
+        'delivery_result_present': bool(receipt),
         'uploads_count': len(uploads),
         'uploads_ready': sum(1 for u in uploads if u.get('status') == 'ready'),
         'read_only': True,

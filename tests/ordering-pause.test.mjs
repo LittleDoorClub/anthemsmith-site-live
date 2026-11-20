@@ -1,6 +1,6 @@
 // Offline source/boundary fixture only. No orders, payments, messages or media are sent.
 //
-// AS-MUIJ11B6 containment guard, RE-POINTED for the v2 client (2026-11-20 integration).
+// the legacy checkout containment guard, RE-POINTED for the v2 client (2026-11-20 integration).
 // The pause moved out of app.js (relay chain, retired) and into two places that must agree:
 //   order-config.js  -> window.ANTHEMSMITH_ORDERING_PAUSED (release owner's switch)
 //   order-client.js  -> reads it fail-closed: `!== false`, so a missing/typo'd config

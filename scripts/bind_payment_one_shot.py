@@ -1,11 +1,11 @@
-"""One-shot: bind Venmo txn 4694831192117582167 to AS-MUIJ11B6 as verified_paid.
-Gabe authorized: "figure it out." Removes itself after success."""
-import hashlib, json, os, re, urllib.request
+"""Bind the privately configured legacy order to its independently verified payment."""
+import json, os, urllib.request
+from legacy_recovery_settings import required_order_id, required_setting
 
 ORIGIN = "https://veqpmdsiqcjjpxgcubrp.supabase.co"
 TABLE = "anthemsmith_recovery_orders"
-OID = "AS-MUIJ11B6"
-VENMO = "4694831192117582167"
+OID = required_order_id()
+VENMO = required_setting("ANTHEMSMITH_LEGACY_PAYMENT_REF", r"[0-9]{12,30}")
 
 KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 if not KEY:
@@ -31,7 +31,7 @@ if row.get("payment_state") == "verified_paid" and row.get("payment_ref") == VEN
     exit(0)
 
 if row.get("payment_state") != "unverified" or row.get("payment_ref") is not None:
-    print("PAYMENT_BIND_FAILED: unexpected current state " + str({k: row.get(k) for k in ("payment_state","payment_ref")}))
+    print("PAYMENT_BIND_FAILED: unexpected current state")
     exit(1)
 
 # CAS update
@@ -43,7 +43,7 @@ try:
     with urllib.request.urlopen(req, timeout=30) as r:
         result = json.loads(r.read())
 except urllib.error.HTTPError as e:
-    print("PAYMENT_BIND_FAILED: HTTP " + str(e.code) + " " + e.read().decode()[:200])
+    print("PAYMENT_BIND_FAILED: HTTP " + str(e.code))
     exit(1)
 
 # Readback verify
@@ -56,4 +56,4 @@ if len(final) != 1 or final[0].get("payment_state") != "verified_paid" or final[
     print("PAYMENT_BIND_FAILED: readback mismatch")
     exit(1)
 
-print(json.dumps({"result": "payment_bound", "order_id": OID, "payment_ref": VENMO}))
+print("PAYMENT_BOUND: readback verified")

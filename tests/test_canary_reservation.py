@@ -70,7 +70,7 @@ class ReservationScopeTests(unittest.TestCase):
     def test_customer_namespace_refused_before_import_or_db(self):
         with patch.object(c, 'inspect', side_effect=AssertionError('no customer reads')):
             with self.assertRaisesRegex(c.CanaryError, 'synthetic_namespace_required'):
-                c.reservation_test('AS-MUIJ11B6')
+                c.reservation_test('AS-CUSTOMER-FIXTURE')
 
     def test_live_capability_refused_before_cas(self):
         row = synthetic()

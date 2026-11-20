@@ -17,7 +17,7 @@ SHA = 'a' * 64
 
 class ScopeTests(unittest.TestCase):
     def test_real_customer_and_arbitrary_ids_rejected_before_network(self):
-        for oid in ['AS-MUIJ11B6', 'AS-WHALE-NORMAL-20260926', '../AS-OX-CANARY-TEST', 'AS-OX-CANARY-x']:
+        for oid in ['AS-CUSTOMER-FIXTURE', 'AS-WHALE-NORMAL-20260926', '../AS-OX-CANARY-TEST', 'AS-OX-CANARY-x']:
             with tempfile.TemporaryDirectory() as tmp:
                 event = Path(tmp) / 'event.json'
                 event.write_text(json.dumps({'inputs': {'action': 'seed', 'order_id': oid, 'token_sha256': SHA}}))
