@@ -23,7 +23,7 @@ async function environment({url='https://anthemsmith.com/',stored=null,status='a
  if(stored)w.localStorage.setItem('anthemsmith_order_v2',JSON.stringify(stored));
  let current=status;
  w.fetch=async(url,init={})=>{
-  assert.equal(new URL(url).origin,'https://anthemsmith.com');
+  assert.equal(new URL(url).origin,new URL(w.ANTHEMSMITH_API_BASE||'/api','https://anthemsmith.com').origin);
   calls.push({url,init});
   if(handler){const out=await handler(url,init,calls);if(out)return out;}
   let body;
@@ -109,5 +109,17 @@ test('paused build still restores a paid order from the private link',async()=>{
   assert.equal(e.calls[0].init.headers.Authorization,'Bearer '+token);
   assert(e.w.document.querySelector('#brief audio'));
   assert(!e.calls.some(c=>c.url.endsWith('/orders')||c.url.endsWith('/checkout')));
+ }finally{e.close();}
+});
+test('order and checkout URLs resolve onto the configured API mount',async()=>{
+ const e=await environment({paused:false});try{
+  e.fill();await e.w.submitInstant();
+  const base=new URL(e.w.ANTHEMSMITH_API_BASE);
+  assert.equal(base.host,'backend-production-0f3d.up.railway.app');
+  assert.equal(base.pathname,'/api');
+  const [order,checkout]=e.calls.map(c=>new URL(c.url));
+  assert.equal(order.href,base.href.replace(/\/$/,'')+'/orders');
+  assert.equal(checkout.href,base.href.replace(/\/$/,'')+'/orders/'+oid+'/checkout');
+  assert.equal(order.host,checkout.host);
  }finally{e.close();}
 });
