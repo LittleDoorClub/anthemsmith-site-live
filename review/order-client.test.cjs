@@ -11,7 +11,7 @@ const root=path.resolve(__dirname,'..');
 const token='t'.repeat(48),oid='AS-12345678-abcd-efgh-1234';
 const saved={order_id:oid,recovery_token:token};
 const tick=()=>new Promise(r=>setImmediate(r));
-async function environment({url='https://anthemsmith.com/',stored=null,status='awaiting_payment',handler=null}={}) {
+async function environment({url='https://anthemsmith.com/',stored=null,status='awaiting_payment',handler=null,paused=false}={}) {
  const dom=new JSDOM(fs.readFileSync(path.join(root,'index.html'),'utf8'),{url,runScripts:'outside-only'}),w=dom.window;
  const calls=[],timers=new Map();let seq=0;
  w.setTimeout=(fn,delay)=>{timers.set(++seq,{fn,delay});return seq;};w.clearTimeout=id=>timers.delete(id);
@@ -33,7 +33,11 @@ async function environment({url='https://anthemsmith.com/',stored=null,status='a
   else body={order_id:oid,status:current,audio_url:current==='ready'?'https://anthemsmith.com/private/signed-song.mp3':undefined,notification_status:'queued'};
   return {ok:true,status:200,json:async()=>body};
  };
- for(const name of ['app.js','order-config.js','order-client.js'])w.eval(fs.readFileSync(path.join(root,name),'utf8'));
+ for(const name of ['app.js','order-config.js'])w.eval(fs.readFileSync(path.join(root,name),'utf8'));
+ // order-config ships the containment gate ON; these tests drive the flow, so state the build
+ // they exercise explicitly instead of depending on the shipped default.
+ w.ANTHEMSMITH_ORDERING_PAUSED=paused;
+ w.eval(fs.readFileSync(path.join(root,'order-client.js'),'utf8'));
  await tick();
  const set=(name,value)=>{const el=w.document.querySelector(`[name="${name}"]`);el.value=value;return el;};
  const fill=()=>{set('instagram1','https://instagram.com/maya/');set('phone','(202) 555-0123');w.document.getElementById('consent_rights').checked=true;};
@@ -87,4 +91,23 @@ test('needs-input recovery updates existing order and never opens another paymen
 });
 test('unknown status cannot falsely display ready',async()=>{
  const e=await environment({stored:saved,status:'broken'});try{assert(!e.w.document.querySelector('#brief audio'));assert(e.w.document.querySelector('#brief').textContent.includes('could not confirm'));}finally{e.close();}
+});
+test('paused build refuses a new order and never touches the network',async()=>{
+ const e=await environment({paused:true});try{
+  e.fill();
+  const button=e.w.document.getElementById('checkoutButton');
+  assert.equal(button.disabled,true);assert.match(button.textContent,/paused/i);
+  await e.w.submitInstant();
+  assert.equal(e.calls.length,0);
+  assert.match(e.w.document.getElementById('requestStatus').textContent,/paused/i);
+  assert.equal(e.w.document.getElementById('deliveryPhone').value,'(202) 555-0123');
+ }finally{e.close();}
+});
+test('paused build still restores a paid order from the private link',async()=>{
+ const e=await environment({paused:true,stored:saved,status:'ready'});try{
+  assert.equal(e.calls.length,1);
+  assert.equal(e.calls[0].init.headers.Authorization,'Bearer '+token);
+  assert(e.w.document.querySelector('#brief audio'));
+  assert(!e.calls.some(c=>c.url.endsWith('/orders')||c.url.endsWith('/checkout')));
+ }finally{e.close();}
 });

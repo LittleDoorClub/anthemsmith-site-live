@@ -86,6 +86,22 @@
   setDelivery();
   form.addEventListener('input',()=>{feedback.textContent='';});
 
+  // Containment gate (AS-MUIJ11B6). Ordering stays paused until live verification passes, so no
+  // new order, upload or payment can leave this page. Recovery of an existing order is NOT paused:
+  // restore()/watch() below still read the private link and show a paid customer their song.
+  const PAUSED = window.ANTHEMSMITH_ORDERING_PAUSED !== false;
+  const PAUSE_MESSAGE = 'New orders are temporarily paused while we verify uploads and payment. '
+    + 'Already paid? Use the private order link from your confirmation — do not pay again.';
+  if (PAUSED) {
+    button.disabled = true;
+    button.textContent = 'Ordering paused';
+    feedback.textContent = PAUSE_MESSAGE;
+  } else {
+    // index.html ships the button shut so a page without this script can never take an order.
+    button.disabled = false;
+    button.textContent = 'Continue to secure payment — $5';
+  }
+
   async function jsonFetch(path, options={}) {
     const controller = new AbortController();
     const timer = setTimeout(()=>controller.abort(),90000);
@@ -179,6 +195,7 @@
   }
 
   window.submitInstant=async function() {
+    if(PAUSED){feedback.textContent=PAUSE_MESSAGE;button.disabled=true;return;}
     if(busy || !form.reportValidity())return;
     busy=true;button.disabled=true;feedback.textContent='Saving your story…';
     try{
