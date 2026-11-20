@@ -91,7 +91,7 @@
     email.disabled = sms; email.required = !sms;
   }
 
-  // Containment gate (AS-MUIJ11B6). Ordering stays paused until live verification passes, so no
+  // Containment gate (incident). Ordering stays paused until live verification passes, so no
   // new order, upload or payment can leave this page. Recovery of an existing order is NOT paused:
   // restore()/watch() below still read the private link and show a paid customer their song.
   const PAUSED = window.ANTHEMSMITH_ORDERING_PAUSED !== false;
