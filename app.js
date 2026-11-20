@@ -43,18 +43,18 @@ render();onePlayerLaw();moods();
 $('#addProfile').onclick=()=>{const open=$('#secondProfile').hidden;$('#secondProfile').hidden=!open;$('#instagram2').disabled=!open;$('#addProfile').textContent=open?'− Remove second Instagram':'+ Add a second Instagram';if(open)$('#instagram2').focus()};
 for(const selector of ['#instagram1','#instagram2']){$(selector).addEventListener('input',e=>{const f=e.target;f.setCustomValidity('');if(!f.value.trim())return;try{const u=new URL(f.value);if(u.protocol!=='https:'||!['instagram.com','www.instagram.com'].includes(u.hostname.toLowerCase())||u.pathname==='/'||/^\/(p|reel|reels|stories)\//.test(u.pathname))f.setCustomValidity('Paste an Instagram profile URL, not a post link.')}catch{f.setCustomValidity('Paste a complete Instagram profile URL.')}})}
 
-const intakeFiles={screenshot:[],photos:[]};
-const fileConfig={screenshot:{input:'gridShot',status:'shotName',preview:'shotPreviews',limit:2},photos:{input:'photoUpload',status:'photoCount',preview:'photoPreviews',limit:10}};
-const fileUrls={screenshot:[],photos:[]};
+const intakeFiles={link:[],screenshot:[],photos:[]};
+const fileConfig={link:{input:'linkFiles',status:'linkFileStatus',preview:'linkPreviews',limit:10},screenshot:{input:'gridShot',status:'shotName',preview:'shotPreviews',limit:2},photos:{input:'photoUpload',status:'photoCount',preview:'photoPreviews',limit:10}};
+const fileUrls={link:[],screenshot:[],photos:[]};
 function activeLane(){return document.querySelector('[name="intake_lane"]:checked').value}
 function pickLane(n){
  for(let i=0;i<3;i++){
   const section=document.getElementById('lane'+i);section.hidden=i!==n;
   section.querySelectorAll('input,textarea,button').forEach(el=>el.disabled=i!==n);
  }
- $('#instagram1').required=n===0;
+ $('#instagram1').required=false;
  $('#instagram2').disabled=n!==0||$('#secondProfile').hidden;
- for(const kind of ['screenshot','photos']){const el=document.getElementById(fileConfig[kind].input);el.required=false;el.setCustomValidity('')}
+ for(const kind of ['link','screenshot','photos']){const el=document.getElementById(fileConfig[kind].input);el.required=false;el.setCustomValidity('')}
 }
 function showFiles(kind){
  const c=fileConfig[kind],container=document.getElementById(c.preview);
@@ -69,11 +69,11 @@ function showFiles(kind){
  });
  document.getElementById(c.status).textContent=intakeFiles[kind].length+' selected';
 }
-for(const kind of ['screenshot','photos']){
+for(const kind of ['link','screenshot','photos']){
  const c=fileConfig[kind],input=document.getElementById(c.input);
  input.addEventListener('change',()=>{
   const selected=Array.from(input.files);let error='';
-  if(selected.length>c.limit)error='Choose at most '+c.limit+' '+(kind==='photos'?'photos.':'screenshot'+(c.limit>1?'s':'')+'.');
+  if(selected.length>c.limit)error='Choose at most '+c.limit+' '+(kind==='screenshot'?'screenshot'+(c.limit>1?'s':'')+'.':'photos.');
   else if(selected.some(f=>!['image/jpeg','image/png','image/webp'].includes(f.type)))error='Use JPG, PNG or WebP images.';
   else if(selected.some(f=>f.size===0||f.size>15*1024*1024))error='Each image must contain data and be no larger than 15 MB.';
   else if(selected.reduce((total,f)=>total+f.size,0)>50*1024*1024)error='Keep the selected images under 50 MB in total.';

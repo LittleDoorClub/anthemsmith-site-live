@@ -45,8 +45,9 @@
     const lane = values.intake_lane;
     if (!(lane in laneFields)) throw new Error('Choose how you want to share your story.');
     const files = selectedIntakeFiles();
-    if (lane === 'link' && !values.instagram1?.trim()) throw new Error('Add your Instagram profile link.');
-    if (lane !== 'link' && !files.length) throw new Error('Choose your photos or a grid screenshot.');
+    // The upload is the anchor on EVERY lane: production rejects an Instagram order with no
+    // photo (422 instagram_photo_upload_required). The profile link is optional context.
+    if (!files.length) throw new Error('Add at least one photo or a grid screenshot — that is what your song is built from.');
     const max = lane === 'screenshot' ? 2 : 10;
     if (files.length > max || files.reduce((s,f)=>s+f.size,0) > 50*1024*1024 || files.some(f=>f.size<=0 || f.size>15*1024*1024 || !['image/jpeg','image/png','image/webp'].includes(f.type))) throw new Error('Use JPG, PNG or WebP images: up to 15 MB each and 50 MB total.');
     if (values.consent !== 'yes') throw new Error('Please confirm you have permission to share this content.');
@@ -57,9 +58,12 @@
     const profiles = lane === 'link' ? [instagram(values.instagram1 || ''), instagram(values.instagram2 || '')].filter(Boolean) : [];
     const referenceUrl = (values.referenceUrl || '').trim();
     if (referenceUrl) safeUrl(referenceUrl,['youtube.com','www.youtube.com','m.youtube.com','music.youtube.com','youtu.be','open.spotify.com','spotify.link']);
+    // A link-lane order with no usable link is a photo order; never claim 'link' intake with
+    // an empty instagram_urls, because production validates the link lane as link-plus-photo.
+    const intake = lane === 'link' && !profiles.length ? 'photos' : lane;
     const request = {
       schema_version:2,
-      intake:lane,
+      intake,
       instagram_urls:profiles,
       captions:(values[laneFields[lane]] || '').trim(),
       details:(values.details || '').trim(),

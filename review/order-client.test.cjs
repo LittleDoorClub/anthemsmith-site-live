@@ -42,8 +42,9 @@ async function environment({url='https://anthemsmith.com/',stored=null,status='a
  const set=(name,value)=>{const el=w.document.querySelector(`[name="${name}"]`);el.value=value;return el;};
  const fill=()=>{set('instagram1','https://instagram.com/maya/');set('phone','(202) 555-0123');w.document.getElementById('consent_rights').checked=true;};
  const chooseFiles=(lane,count)=>{
-  const radio=w.document.querySelector(`[name="intake_lane"][value="${lane}"]`);radio.checked=true;w.pickLane(lane==='screenshot'?1:2);
-  const input=w.document.getElementById(lane==='screenshot'?'gridShot':'photoUpload');
+  const radio=w.document.querySelector(`[name="intake_lane"][value="${lane}"]`);radio.checked=true;
+  w.pickLane({link:0,screenshot:1,photos:2}[lane]);
+  const input=w.document.getElementById({link:'linkFiles',screenshot:'gridShot',photos:'photoUpload'}[lane]);
   const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nAAAAABJRU5ErkJggg==','base64');
   const files=Array.from({length:count},(_,i)=>new w.File([png],'photo-'+i+'.png',{type:'image/png',lastModified:1}));
   Object.defineProperty(input,'files',{value:files,configurable:true});input.dispatchEvent(new w.Event('change',{bubbles:true}));return files;
@@ -52,18 +53,18 @@ async function environment({url='https://anthemsmith.com/',stored=null,status='a
 }
 test('complete brief and delivery are saved before checkout, with no generation call',async()=>{
  const e=await environment();try{
- e.fill();e.w.document.getElementById('addProfile').click();e.set('instagram2','https://instagram.com/friend/?utm_source=test');
+ e.fill();e.chooseFiles('link',2);e.w.document.getElementById('addProfile').click();e.set('instagram2','https://instagram.com/friend/?utm_source=test');
  e.set('laneDetails0','Cake collapsed. Confidence did not.');e.set('details','Birthday in Tampa');e.set('names','Maya and Alex');e.set('referenceUrl','https://youtu.be/reference');e.set('artist','An artist');e.set('song','A song');e.set('genre','Pop');
  await e.w.submitInstant();
  assert.equal(e.calls.length,2);assert(e.calls[0].url.endsWith('/orders'));assert(e.calls[1].url.endsWith('/checkout'));
  const request=JSON.parse(e.calls[0].init.body.get('request'));
- assert.deepEqual(request.instagram_urls,['https://www.instagram.com/maya/','https://www.instagram.com/friend/']);assert.equal(request.captions,'Cake collapsed. Confidence did not.');assert.equal(request.names,'Maya and Alex');assert.equal(request.reference.genre,'Pop');assert.equal(request.reference.url,'https://youtu.be/reference');assert.equal(request.delivery.address,'+12025550123');assert.equal(request.delivery.method,'sms');assert.equal(request.intake,'link');
+ assert.deepEqual(request.instagram_urls,['https://www.instagram.com/maya/','https://www.instagram.com/friend/']);assert.equal(request.captions,'Cake collapsed. Confidence did not.');assert.equal(request.names,'Maya and Alex');assert.equal(request.reference.genre,'Pop');assert.equal(request.reference.url,'https://youtu.be/reference');assert.equal(request.delivery.address,'+12025550123');assert.equal(request.delivery.method,'sms');assert.equal(request.intake,'link');assert.equal(e.calls[0].init.body.getAll('files').length,2);
  assert.equal(e.calls[1].init.headers.Authorization,'Bearer '+token);assert.equal(e.w.document.querySelector('.checkout-link').target,'');
  const stored=JSON.parse(e.w.localStorage.getItem('anthemsmith_order_v2'));assert.deepEqual(stored,saved);assert.equal(e.w.document.querySelectorAll('#builder').length,1);
  }finally{e.close();}
 });
 test('missing contact keeps fields editable and sends nothing',async()=>{
- const e=await environment();try{e.fill();e.set('phone','');await e.w.submitInstant();assert.equal(e.calls.length,0);assert(e.w.document.getElementById('deliveryPhone'));assert.equal(e.w.document.getElementById('checkoutButton').disabled,false);}finally{e.close();}
+ const e=await environment();try{e.fill();e.chooseFiles('link',1);e.set('phone','');await e.w.submitInstant();assert.equal(e.calls.length,0);assert(e.w.document.getElementById('deliveryPhone'));assert.equal(e.w.document.getElementById('checkoutButton').disabled,false);}finally{e.close();}
 });
 test('screenshot uploads bytes and retains the correct caption and lane',async()=>{
  const e=await environment();try{e.fill();const files=e.chooseFiles('screenshot',1);e.set('laneDetails1','The dog owns my yoga mat.');await e.w.submitInstant();assert.equal(e.calls.length,2);const body=e.calls[0].init.body,r=JSON.parse(body.get('request'));assert.equal(r.intake,'screenshot');assert.equal(r.captions,'The dog owns my yoga mat.');assert.equal(body.getAll('files').length,1);assert.equal(body.get('files').size,files[0].size);assert.equal(r.instagram_urls.length,0);}finally{e.close();}
@@ -81,10 +82,10 @@ test('paid URL flag cannot confirm payment or start generation',async()=>{
  const e=await environment({url:'https://anthemsmith.com/?paid=1'});try{assert.equal(e.calls.length,0);assert(e.w.document.querySelector('#brief').textContent.includes('do not need to pay again'));}finally{e.close();}
 });
 test('network retry reuses idempotency key and preserves entered contact',async()=>{
- let fail=true;const e=await environment({handler:async(url)=>{if(url.endsWith('/orders')&&fail){fail=false;throw new Error('Network interrupted');}}});try{e.fill();await e.w.submitInstant();assert.equal(e.w.document.getElementById('deliveryPhone').value,'(202) 555-0123');await e.w.submitInstant();const posts=e.calls.filter(c=>c.url.endsWith('/orders'));assert.equal(posts.length,2);assert.equal(posts[0].init.headers['Idempotency-Key'],posts[1].init.headers['Idempotency-Key']);}finally{e.close();}
+ let fail=true;const e=await environment({handler:async(url)=>{if(url.endsWith('/orders')&&fail){fail=false;throw new Error('Network interrupted');}}});try{e.fill();e.chooseFiles('link',1);await e.w.submitInstant();assert.equal(e.w.document.getElementById('deliveryPhone').value,'(202) 555-0123');await e.w.submitInstant();const posts=e.calls.filter(c=>c.url.endsWith('/orders'));assert.equal(posts.length,2);assert.equal(posts[0].init.headers['Idempotency-Key'],posts[1].init.headers['Idempotency-Key']);}finally{e.close();}
 });
 test('double click cannot create duplicate requests',async()=>{
- const e=await environment();try{e.fill();await Promise.all([e.w.submitInstant(),e.w.submitInstant()]);assert.equal(e.calls.filter(c=>c.url.endsWith('/orders')).length,1);}finally{e.close();}
+ const e=await environment();try{e.fill();e.chooseFiles('link',1);await Promise.all([e.w.submitInstant(),e.w.submitInstant()]);assert.equal(e.calls.filter(c=>c.url.endsWith('/orders')).length,1);}finally{e.close();}
 });
 test('needs-input recovery updates existing order and never opens another payment',async()=>{
  const e=await environment({stored:saved,status:'needs_input'});try{const field=e.w.document.querySelector('#brief textarea');field.value='We met at the dog park.';e.w.document.querySelector('#brief button').click();await tick();await tick();assert(e.calls.some(c=>c.init.method==='PATCH'));assert(!e.calls.some(c=>c.url.endsWith('/checkout')));assert(e.w.document.querySelector('#brief').textContent.includes('queue'));}finally{e.close();}
@@ -113,7 +114,7 @@ test('paused build still restores a paid order from the private link',async()=>{
 });
 test('order and checkout URLs resolve onto the configured API mount',async()=>{
  const e=await environment({paused:false});try{
-  e.fill();await e.w.submitInstant();
+  e.fill();e.chooseFiles('link',1);await e.w.submitInstant();
   const base=new URL(e.w.ANTHEMSMITH_API_BASE);
   assert.equal(base.host,'backend-production-0f3d.up.railway.app');
   assert.equal(base.pathname,'/api');
@@ -121,5 +122,40 @@ test('order and checkout URLs resolve onto the configured API mount',async()=>{
   assert.equal(order.href,base.href.replace(/\/$/,'')+'/orders');
   assert.equal(checkout.href,base.href.replace(/\/$/,'')+'/orders/'+oid+'/checkout');
   assert.equal(order.host,checkout.host);
+ }finally{e.close();}
+});
+
+test('an Instagram link with no photo is refused before any network call',async()=>{
+ const e=await environment({paused:false});try{
+  e.fill();
+  await e.w.submitInstant();
+  assert.equal(e.calls.length,0);
+  assert.match(e.w.document.getElementById('requestStatus').textContent,/photo or a grid screenshot/i);
+  assert.equal(e.w.document.getElementById('instagram1').value,'https://instagram.com/maya/');
+ }finally{e.close();}
+});
+test('photos with no Instagram link go out as a photo order, not a link order',async()=>{
+ const e=await environment({paused:false});try{
+  e.fill();e.set('instagram1','');
+  e.chooseFiles('link',3);
+  await e.w.submitInstant();
+  assert.equal(e.calls.length,2);
+  const body=e.calls[0].init.body,r=JSON.parse(body.get('request'));
+  assert.equal(r.intake,'photos');
+  assert.equal(r.instagram_urls.length,0);
+  assert.equal(body.getAll('files').length,3);
+ }finally{e.close();}
+});
+test('the Instagram lane shows a required upload before the optional link',async()=>{
+ const e=await environment({paused:false});try{
+  const lane0=e.w.document.getElementById('lane0'),upload=lane0.querySelector('#linkFiles');
+  assert(upload,'lane0 must carry its own upload');
+  assert.equal(upload.type,'file');
+  assert.equal(upload.multiple,true);
+  assert.match(lane0.textContent,/Photos or a grid screenshot/);
+  assert.match(lane0.textContent,/Required/);
+  assert.match(lane0.textContent,/optional context/);
+  assert.equal(e.w.document.getElementById('instagram1').required,false);
+  assert(lane0.textContent.indexOf('Photos or a grid screenshot')<lane0.textContent.indexOf('Instagram URL'),'upload reads before the link');
  }finally{e.close();}
 });
