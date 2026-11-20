@@ -9,13 +9,17 @@
   const feedback = document.getElementById('requestStatus');
   const button = document.getElementById('checkoutButton');
   const storageKey = 'anthemsmith_order_v2';
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const oldOrder = /^AS-[A-Za-z0-9_-]{8,80}$/;
+  const cancelledReturn = new URLSearchParams(location.search).get('cancelled') === '1';
   const api = new URL(window.ANTHEMSMITH_API_BASE || '/api', location.origin);
   const laneFields = {link:'laneDetails0', screenshot:'laneDetails1', photos:'laneDetails2'};
   let pending = null, busy = false, pollTimer = null, networkFailures = 0;
+  let watchVersion = 0, clearMedia = () => {};
 
   if (api.protocol !== 'https:' && !['localhost','127.0.0.1'].includes(api.hostname)) {
-    feedback.textContent = 'Checkout is temporarily unavailable. Please try again shortly.';
-    button.disabled = true;
+    (feedback || brief).textContent = 'The order service is temporarily unavailable. Please try again shortly.';
+    if (button) button.disabled = true;
     return;
   }
   const endpoint = path => api.href.replace(/\/$/, '') + path;
@@ -86,9 +90,6 @@
     phone.disabled = !sms; phone.required = sms;
     email.disabled = sms; email.required = !sms;
   }
-  form.querySelectorAll('[name="delivery"]').forEach(el=>el.addEventListener('change',setDelivery));
-  setDelivery();
-  form.addEventListener('input',()=>{feedback.textContent='';});
 
   // Containment gate (AS-MUIJ11B6). Ordering stays paused until live verification passes, so no
   // new order, upload or payment can leave this page. Recovery of an existing order is NOT paused:
@@ -96,21 +97,20 @@
   const PAUSED = window.ANTHEMSMITH_ORDERING_PAUSED !== false;
   const PAUSE_MESSAGE = 'New orders are temporarily paused while we verify uploads and payment. '
     + 'Already paid? Use the private order link from your confirmation — do not pay again.';
-  if (PAUSED) {
-    button.disabled = true;
-    button.textContent = 'Ordering paused';
-    feedback.textContent = PAUSE_MESSAGE;
-  } else {
-    // index.html ships the button shut so a page without this script can never take an order.
-    button.disabled = false;
-    button.textContent = 'Continue to secure payment — $5';
+  if (form) {
+    form.querySelectorAll('[name="delivery"]').forEach(el=>el.addEventListener('change',setDelivery));
+    setDelivery();
+    form.addEventListener('input',()=>{feedback.textContent='';});
+    button.disabled = PAUSED;
+    button.textContent = PAUSED ? 'Ordering paused' : 'Continue to secure payment — $5';
+    if (PAUSED) feedback.textContent = PAUSE_MESSAGE;
   }
 
   async function jsonFetch(path, options={}) {
     const controller = new AbortController();
     const timer = setTimeout(()=>controller.abort(),90000);
     try {
-      const r = await fetch(endpoint(path),{...options,signal:controller.signal,credentials:'omit',cache:'no-store',referrerPolicy:'no-referrer'});
+      const r = await fetch(endpoint(path),{...options,signal:controller.signal,credentials:'omit',cache:'no-store',redirect:'error',referrerPolicy:'no-referrer'});
       const body = await r.json().catch(()=>null);
       if (!r.ok || !body || typeof body !== 'object') throw new Error(body?.message || (r.status===429?'Please wait a moment, then try again.':'We could not reach your order. Please try again.'));
       return body;
@@ -118,16 +118,29 @@
   }
   function persist(order) {
     // Store only the private recovery credential, never the photos or contact.
-    try {localStorage.setItem(storageKey,JSON.stringify(order));} catch (_) { /* recovery link remains visible */ }
+    try {
+      if (uuid.test(order.order_id)) {
+        sessionStorage.setItem('anthemsmith_private_'+order.order_id,JSON.stringify({order_id:order.order_id,token:order.recovery_token}));
+      } else {
+        localStorage.setItem(storageKey,JSON.stringify(order));
+      }
+    } catch (_) { /* The customer can still save the complete private link. */ }
   }
   function recoveryUrl(order) {
+    if (uuid.test(order.order_id)) {
+      const url = new URL('backend-song.html',location.href);
+      url.hash = new URLSearchParams({order:order.order_id,token:order.recovery_token}).toString();
+      return url.href;
+    }
     const url = new URL(location.pathname,location.origin);
     url.searchParams.set('order',order.order_id);
     url.hash = new URLSearchParams({access:order.recovery_token}).toString();
     return url.href;
   }
   function validOrder(order) {
-    return order && /^AS-[A-Za-z0-9_-]{8,80}$/.test(order.order_id) && /^[A-Za-z0-9_-]{32,256}$/.test(order.recovery_token);
+    if (!order || typeof order.order_id !== 'string' || typeof order.recovery_token !== 'string') return false;
+    return uuid.test(order.order_id) ? /^[A-Za-z0-9_-]{43}$/.test(order.recovery_token)
+      : oldOrder.test(order.order_id) && /^[A-Za-z0-9_-]{32,256}$/.test(order.recovery_token);
   }
   function clearPoll() {if(pollTimer) clearTimeout(pollTimer);pollTimer=null;}
   function showOrder(order, heading, message) {
@@ -150,27 +163,107 @@
     action('Check payment status',()=>watch(order));
   }
   async function createCheckout(order) {
+    if (PAUSED) throw new Error('Checkout is paused. You can check your saved order here.');
     const data=await jsonFetch('/orders/'+encodeURIComponent(order.order_id)+'/checkout',{method:'POST',headers:{Authorization:'Bearer '+order.recovery_token,'Idempotency-Key':order.order_id+'-checkout'}});
     showCheckout(order,data.checkout_url);
   }
+  async function loadPrivateSong(order) {
+    const controller=new AbortController();
+    const audio=document.createElement('audio'), download=document.createElement('a'), message=document.createElement('p');
+    const limit=20*1024*1024;
+    let objectUrl, timeout;
+    audio.controls=true; audio.preload='auto'; audio.hidden=true;
+    download.textContent='Download your song'; download.className='text-button'; download.download='AnthemSmith-song.mp3'; download.hidden=true;
+    message.setAttribute('role','status'); message.textContent='Loading your full song…';
+    brief.append(message,audio,download);
+    clearMedia=() => {
+      controller.abort();
+      clearTimeout(timeout);
+      audio.removeAttribute('src');
+      download.removeAttribute('href');
+      audio.hidden=true; download.hidden=true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      objectUrl=null;
+    };
+    function failed() {
+      if (controller.signal.aborted) return;
+      clearMedia();
+      message.textContent='Your full song could not be loaded. Retry this order or contact @AnthemSmith. Do not pay again.';
+      action('Retry loading song',()=>watch(order));
+    }
+    try {
+      timeout=setTimeout(failed,90000);
+      const response=await fetch(endpoint('/orders/'+encodeURIComponent(order.order_id)+'/download'),{
+        headers:{Authorization:'Bearer '+order.recovery_token},credentials:'omit',cache:'no-store',
+        referrerPolicy:'no-referrer',redirect:'error',signal:controller.signal
+      });
+      if (controller.signal.aborted) return;
+      if (response.status!==200 || !/^audio\/(mpeg|mp3)(;|$)/i.test(response.headers.get('Content-Type') || '') ||
+          Number(response.headers.get('Content-Length'))>limit || !response.body) throw new Error();
+      const reader=response.body.getReader(), parts=[];
+      let size=0;
+      try {
+        for (;;) {
+          const {done,value}=await reader.read();
+          if (done) break;
+          size+=value.byteLength;
+          if (size>limit) throw new Error();
+          parts.push(value);
+        }
+      } finally {reader.releaseLock();}
+      if (controller.signal.aborted) return;
+      if (!size) throw new Error();
+      objectUrl=URL.createObjectURL(new Blob(parts,{type:'audio/mpeg'}));
+      function fullLength() {
+        return Number.isFinite(audio.duration) && audio.duration>=180 && audio.duration<=240;
+      }
+      audio.addEventListener('loadedmetadata',()=>{if (!fullLength()) failed();});
+      audio.addEventListener('error',failed);
+      audio.addEventListener('canplay',()=>{
+        if (controller.signal.aborted) return;
+        if (!fullLength()) {failed();return;}
+        clearTimeout(timeout);
+        message.textContent='Your full song is ready to play or download.';
+        audio.hidden=false;download.href=objectUrl;download.hidden=false;
+      });
+      message.textContent='Checking your full song…';
+      audio.src=objectUrl;
+      audio.load();
+    } catch (_) {failed();}
+  }
   async function watch(order) {
+    const version=++watchVersion;
     clearPoll();
+    clearMedia();
     try {
       const data=await jsonFetch('/orders/'+encodeURIComponent(order.order_id),{headers:{Authorization:'Bearer '+order.recovery_token}});
+      if (version!==watchVersion) return;
       networkFailures=0;
-      if(data.order_id!==order.order_id) throw new Error('Order lookup mismatch. Please try again.');
+      if(data.order_id!==order.order_id || typeof data.status!=='string') throw new Error('Order lookup mismatch. Please try again.');
+      persist(order);
       if(data.status==='awaiting_payment' || data.status==='draft') {
-        showOrder(order,'Your request is saved.','Payment has not been confirmed yet. You can safely return to checkout.');
-        action('Continue to payment',async()=>{try{await createCheckout(order);}catch(e){showOrder(order,'Your request is saved.',e.message);action('Try again',()=>watch(order));}});
+        const heading = cancelledReturn ? 'Checkout was closed. Your request is saved.' : 'Your request is saved.';
+        const message = PAUSED ? 'Payment has not been confirmed. Checkout is paused. You can check this order here.'
+          : 'Payment has not been confirmed. Check its status before resuming checkout.';
+        showOrder(order,heading,message);
+        if (!PAUSED) action('Continue to payment',async()=>{try{await createCheckout(order);}catch(e){showOrder(order,'Your request is saved.',e.message);action('Try again',()=>watch(order));}});
         action('Check payment status',()=>watch(order));return;
       }
-      if(data.status==='ready') {
+      if(data.status==='ready' || data.status==='delivered') {
         showOrder(order,'Your song is ready.','Play it here, or save the full song.');
-        if(data.audio_url) {
+        if (uuid.test(order.order_id)) {
+          loadPrivateSong(order);
+        } else if(data.audio_url) {
           const url=safeUrl(data.audio_url);const audio=document.createElement('audio');audio.controls=true;audio.preload='none';audio.src=url;
           const link=document.createElement('a');link.href=url;link.textContent='Download your song';link.className='text-button';link.download='AnthemSmith-song.mp3';link.referrerPolicy='no-referrer';brief.append(audio,link);
         } else {const p=document.createElement('p');p.textContent='Your download link is being prepared. Check again in a moment.';brief.append(p);action('Refresh download',()=>watch(order));}
-        const note=document.createElement('p');note.className='small';note.textContent=data.notification_status==='delivered'?'Your delivery message was delivered.':data.notification_status==='failed'?'We could not deliver the message. Your song is safe here.':'Your delivery message is being prepared.';brief.append(note);return;
+        const note=document.createElement('p');note.className='small';
+        const receipt=data.notification_receipt?.status || data.notification_status;
+        if(receipt==='delivered') note.textContent='Your delivery message was delivered.';
+        else if(['accepted','sent','already_sent','submitted'].includes(receipt)) note.textContent='Your delivery message was submitted. Delivery confirmation is pending.';
+        else if(['failed','blocked','uncertain'].includes(receipt)) note.textContent='Delivery of your message could not be confirmed. Your song is available here.';
+        else note.textContent='Your delivery message is being prepared.';
+        brief.append(note);return;
       }
       if(data.status==='needs_input') {
         showOrder(order,'Your song needs one more detail.',data.message || 'Add a caption or an inside joke so the song can tell your story.');
@@ -182,15 +275,37 @@
           try{await jsonFetch('/orders/'+encodeURIComponent(order.order_id)+'/details',{method:'PATCH',headers:{Authorization:'Bearer '+order.recovery_token,'Content-Type':'application/json'},body:JSON.stringify({details:field.value.trim()})});await watch(order);}catch(e){error.textContent=e.message;b.disabled=false;}
         });return;
       }
-      if(['failed','cancelled','refunded'].includes(data.status)) {
-        showOrder(order,data.status==='refunded'?'Your payment was refunded.':'Your song needs attention.',data.message || 'Contact us with this order ID. You do not need to pay again.');
+      const held={
+        blocked_spec:'We need to review the song plan before continuing.',
+        blocked_profile:'We need to review the details used to build your song.',
+        needs_reference:'We need help matching your reference track. Include the artist and song title when you contact us.',
+        needs_sources:'We need more of your story. Contact us to confirm which photos or captions to add.',
+        needs_vision:'We could not finish reviewing your photos.',
+        notification_uncertain:'We are checking whether your delivery message reached you.'
+      };
+      if(Object.hasOwn(held,data.status) || ['failed','payment_failed','cancelled','canceled','cancel','refunded'].includes(data.status)) {
+        const instructions='Contact @AnthemSmith with this order ID. You do not need to pay again.';
+        const message=Object.hasOwn(held,data.status) ? held[data.status] : (data.message || '');
+        showOrder(order,data.status==='refunded'?'Your payment was refunded.':'Your order needs attention.',[message,instructions].filter(Boolean).join(' '));
         const support=document.createElement('a');support.href='https://www.instagram.com/anthemsmith/';support.textContent='Contact @AnthemSmith';support.target='_blank';support.rel='noopener noreferrer';brief.append(document.createElement('br'),support);return;
       }
-      const labels={paid:['Payment confirmed.','Your order is saved. We will send your song when it is ready.'],queued:['Your song is in the queue.','You can close this page. Use your private link to check back.'],processing:['Reading your story.','We are finding the details that make the song yours.'],generating:['Making your song.','You can close this page. We will send a link when it is ready.']};
-      if(!labels[data.status])throw new Error('We could not confirm the latest order status. Your private link will still work.');
+      const labels={
+        paid:['Payment confirmed.','Your order is saved. We will send your song when it is ready.'],
+        queued:['Your song is in the queue.','You can close this page. Use your private link to check back.'],
+        running:['Your song is in progress.','Use your private link to check back.'],
+        processing:['Reading your story.','We are finding the details that make the song yours.'],
+        ingesting:['Reading your story.','We are reviewing the material you shared.'],
+        measuring_reference:['Checking your reference track.','We are working out the musical details for your song.'],
+        vibe_reading:['Reading your story.','We are working on the style of your song.'],
+        spec:['Planning your song.','We are bringing together your story and musical preferences.'],
+        generating:['Making your song.','You can close this page. We will send a link when it is ready.'],
+        qc:['Checking your song.','We are checking the finished recording.']
+      };
+      if(!Object.hasOwn(labels,data.status))throw new Error('We could not confirm the latest order status. Your private link will still work.');
       showOrder(order,...labels[data.status]);
       pollTimer=setTimeout(()=>watch(order),5000);
     }catch(e){
+      if (version!==watchVersion) return;
       networkFailures++;
       showOrder(order,'Your order link is saved.',e.name==='AbortError'?'The connection timed out. Check again in a moment.':e.message);
       action('Check again',()=>watch(order));
@@ -198,7 +313,7 @@
     }
   }
 
-  window.submitInstant=async function() {
+  if (form) window.submitInstant=async function() {
     if(PAUSED){feedback.textContent=PAUSE_MESSAGE;button.disabled=true;return;}
     if(busy || !form.reportValidity())return;
     busy=true;button.disabled=true;feedback.textContent='Saving your story…';
@@ -224,15 +339,50 @@
   };
   function restore() {
     const search=new URLSearchParams(location.search),hash=new URLSearchParams(location.hash.slice(1));
+    if (window.restoreLegacyOrder?.(search, hash, brief, () => {
+      try { return validOrder(JSON.parse(localStorage.getItem(storageKey))); }
+      catch { return false; }
+    })) return;
     let order=null;
-    const linked={order_id:search.get('order'),recovery_token:hash.get('access')};
-    if(validOrder(linked)){order=linked;persist(order);history.replaceState(null,'',location.pathname+'?order='+encodeURIComponent(order.order_id));}
-    else {try{const saved=JSON.parse(localStorage.getItem(storageKey));if(validOrder(saved)&&(!search.get('order')||search.get('order')===saved.order_id))order=saved;}catch(_){}}
-    if(order)watch(order);
-    else if(search.has('order') || search.get('paid')==='1') {
-      brief.hidden=false;brief.textContent='Use the private order link from your confirmation to check your song. If you paid through the earlier checkout, message @AnthemSmith so we can recover it. You do not need to pay again.';
+    const id=search.get('order');
+    const querySecret=search.has('token') || search.has('access');
+    const addressed=search.has('order') || search.has('paid') || search.has('cancelled') || querySecret;
+    const hasFragment=Boolean(location.hash);
+    if (!querySecret && search.getAll('order').length<=1) {
+      if (hasFragment) {
+        if (!id && hash.size===2 && hash.has('order') && hash.has('token') && uuid.test(hash.get('order'))) {
+          order={order_id:hash.get('order'),recovery_token:hash.get('token')};
+        } else if (id && hash.size===1 && hash.has('access')) {
+          order={order_id:id,recovery_token:hash.get('access')};
+        }
+        if (!validOrder(order)) order=null;
+      } else if (uuid.test(id || '')) {
+        try {
+          const saved=JSON.parse(sessionStorage.getItem('anthemsmith_private_'+id));
+          if (saved?.order_id===id) order={order_id:id,recovery_token:saved.token};
+        } catch (_) {}
+      } else if (oldOrder.test(id || '') || (!addressed && form)) {
+        try {
+          const saved=JSON.parse(localStorage.getItem(storageKey));
+          if (oldOrder.test(saved?.order_id || '') && (!id || saved.order_id===id)) order=saved;
+        } catch (_) {}
+      }
+    }
+    // Scrub even invalid capabilities. An ID-only return can only use its own saved credential.
+    if (querySecret || (hasFragment && (!form || addressed || hash.has('order') || hash.has('token') || hash.has('access')))) {
+      const cleanId=validOrder(order) ? order.order_id : id;
+      const clean=new URLSearchParams();
+      if (uuid.test(cleanId || '') || oldOrder.test(cleanId || '')) clean.set('order',cleanId);
+      if (cancelledReturn && clean.has('order')) clean.set('cancelled','1');
+      history.replaceState(null,'',location.pathname+(clean.size?'?'+clean:''));
+    }
+    if (validOrder(order)) watch(order);
+    else if (!form || addressed || hash.has('order') || hash.has('token') || hash.has('access')) {
+      brief.hidden=false;
+      brief.textContent='An order ID alone cannot open your song. Open the complete private order link from your confirmation, or return in the same tab you used for checkout. If you need help, message @AnthemSmith with your order ID. You do not need to pay again.';
     }
   }
   restore();
-  window.addEventListener('pagehide',clearPoll);
+  window.addEventListener('pagehide',()=>{watchVersion++;clearPoll();clearMedia();});
+  window.addEventListener('pageshow',event=>{if(event.persisted) restore();});
 })();
