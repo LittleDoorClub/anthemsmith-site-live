@@ -19,17 +19,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Mint fresh upload capability token for AS-MUIJ11B6
+      - name: Mint fresh upload capability for the configured recovery order
         id: mint
         env:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ANTHEMSMITH_LEGACY_ORDER_ID: ${{ secrets.ANTHEMSMITH_LEGACY_ORDER_ID }}
         run: |
           python scripts/mint_recovery_token.py > token-output.json
-          # NEVER cat the token file into the log (Ox 2026-11-08). This repo is PUBLIC and run 42504704040
-          # printed the full upload URL with a live 24h capability token + the payment reference at 17:23Z.
-          # The send step reads token-output.json directly, so the file is all that is needed; print a
-          # masked line so an operator can still see that the mint worked and which row it touched.
-          python -c "import json; d=json.load(open('token-output.json')); u=str(d.get('url','')); tok=u.split('token=',1)[1] if 'token=' in u else ''; print('MINT OK order=%s url_len=%d token_last4=%s recipient=****%s' % (d.get('order_id'), len(u), tok[-4:], str(d.get('delivery_phone',''))[-4:]))"
+          echo "Recovery capability prepared"
       - name: Send recovery link via SMS
         env:
           TWILIO_SID: ${{ secrets.TWILIO_SID }}
@@ -46,8 +43,6 @@ jobs:
           if not phone:
               raise SystemExit('NO_RECIPIENT: refusing to send')
           msg = f'AnthemSmith: your song order {data[\"order_id\"]} is ready for photos. Upload here (link expires in 24h): {url}  Do not pay again — your order is already paid. - The AnthemSmith team'
-          print(f'SENDING to ****{phone[-4:]}')
-          print(f'MSG: {msg[:80]}...')
 
           sid = os.environ['TWILIO_SID']
           token = os.environ['TWILIO_TOKEN']
@@ -75,12 +70,12 @@ jobs:
               try:
                   with urllib.request.urlopen(req, timeout=30) as r:
                       result = json.load(r)
-                  print(f'SENT to ****{target[-4:]}: {result.get(\"status\", \"?\")} sid={result.get(\"sid\", \"?\")}')
+                  print('Provider accepted recovery message')
                   results.append({'to_suffix': target[-4:], 'provider': 'twilio',
                                   'sid': result.get('sid'), 'status': result.get('status'),
                                   'sent_at': datetime.datetime.now(datetime.timezone.utc).isoformat()})
               except urllib.error.HTTPError as e:
-                  print(f'FAILED to ****{target[-4:]}: {e.code} {e.read().decode()[:200]}')
+                  print(f'Provider rejected recovery message (HTTP {e.code})')
                   results.append({'to_suffix': target[-4:], 'provider': 'twilio',
                                   'http': e.code, 'status': 'failed'})
                   failed += 1
@@ -92,4 +87,5 @@ jobs:
         if: always()
         env:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ANTHEMSMITH_LEGACY_ORDER_ID: ${{ secrets.ANTHEMSMITH_LEGACY_ORDER_ID }}
         run: python scripts/record_recovery_delivery.py

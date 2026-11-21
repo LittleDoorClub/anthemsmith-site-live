@@ -14,7 +14,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Bind AS-MUIJ11B6 → Venmo 4694831192117582167
+      - name: Bind verified payment to the configured recovery order
         env:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ANTHEMSMITH_LEGACY_PAYMENT_REF: ${{ secrets.ANTHEMSMITH_LEGACY_PAYMENT_REF }}
+          ANTHEMSMITH_LEGACY_ORDER_ID: ${{ secrets.ANTHEMSMITH_LEGACY_ORDER_ID }}
         run: python scripts/bind_payment_one_shot.py

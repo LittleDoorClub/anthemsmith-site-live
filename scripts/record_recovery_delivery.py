@@ -7,6 +7,7 @@ send, which is exactly the false picture that re-opened this lane on 2026-11-08.
 
 Exits 0 when there is nothing to record (mint failed, no send attempted).
 """
+from legacy_recovery_settings import required_order_id
 import json
 import os
 import sys
@@ -16,7 +17,6 @@ import urllib.request
 
 ORIGIN = "https://veqpmdsiqcjjpxgcubrp.supabase.co"
 TABLE = "anthemsmith_recovery_orders"
-OID = "AS-MUIJ11B6"
 
 
 def _key():
@@ -38,6 +38,7 @@ def main():
         print("RECORD_SKIPPED: empty results")
         return
 
+    OID = required_order_id()
     key = _key()
     headers = {"apikey": key, "Authorization": "Bearer " + key,
                "Content-Type": "application/json", "User-Agent": "AnthemSmith/1.0",
@@ -68,7 +69,7 @@ def main():
         with urllib.request.urlopen(patch, timeout=30) as response:
             out = json.loads(response.read())
     except urllib.error.HTTPError as exc:
-        print("RECORD_FAILED: HTTP " + str(exc.code) + " " + exc.read().decode()[:200])
+        print("RECORD_FAILED: HTTP " + str(exc.code))
         sys.exit(1)
 
     if len(out) != 1:
@@ -79,8 +80,7 @@ def main():
     got_sms = got.get("sms") if isinstance(got, dict) else None
     ok = isinstance(got_sms, dict) and all(
         str(item.get("to_suffix") or "unknown") in got_sms for item in results)
-    keys = ",".join(sorted(got_sms.keys())) if isinstance(got_sms, dict) else "none"
-    print("RECORDED: delivery_result.sms keys=" + keys)
+    print("RECORDED: delivery result saved")
     print("VERIFIED: " + str(ok))
     if not ok:
         sys.exit(1)

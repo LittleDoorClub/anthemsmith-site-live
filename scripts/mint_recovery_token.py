@@ -1,14 +1,15 @@
-"""Create a fresh upload capability token for AS-MUIJ11B6, store sha256 in DB.
+"""Create a fresh upload capability token for the configured recovery order, store sha256 in DB.
 
 stdout = machine JSON (redirected to token-output.json, never echoed to the log).
-stderr = masked diagnostics only (TOKEN_SHA + last4 + suffix); never the URL, token or full phone.
+stderr = operational status only.
 """
 import hashlib, json, os, re, secrets, base64, sys, urllib.request
+from legacy_recovery_settings import required_order_id
 from datetime import datetime, timezone, timedelta
 
 ORIGIN = "https://veqpmdsiqcjjpxgcubrp.supabase.co"
 TABLE = "anthemsmith_recovery_orders"
-OID = "AS-MUIJ11B6"
+OID = required_order_id()
 RECOVERY_URL = "https://anthemsmith.com/recovery.html"
 
 KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
@@ -30,12 +31,7 @@ if len(rows) != 1:
     exit(1)
 
 row = rows[0]
-_ref = str(row.get("payment_ref") or "")
-# NEVER print a payment reference into a log (Ox 2026-11-08). This workflow runs on a PUBLIC repo and
-# the run log is world-readable: run 42504704040 at 17:23Z printed REF: 4694831192117582167 and the full
-# upload URL with a live capability token. Presence + last 4 is enough for an operator to match a row.
-_ref_masked = ("present ****" + _ref[-4:]) if _ref else "absent"
-print(f"STATUS: {row['status']} PAYMENT: {row['payment_state']} REF: {_ref_masked}", file=sys.stderr)
+print("Read configured recovery order", file=sys.stderr)
 
 # Generate fresh token (32 random bytes -> 43-char base64url)
 token_bytes = secrets.token_bytes(32)
@@ -49,7 +45,7 @@ expires = now + timedelta(hours=24)
 # CAS update: only if token is not already set
 if row.get("token_sha256"):
     # Revoke old token
-    print(f"REVOKING existing token issued {row.get('token_issued_at')}", file=sys.stderr)
+    print("Replacing an existing capability", file=sys.stderr)
 
 body = json.dumps({
     "token_sha256": token_sha,
@@ -70,7 +66,7 @@ try:
     with urllib.request.urlopen(req, timeout=30) as r:
         result = json.loads(r.read())
 except urllib.error.HTTPError as e:
-    print("TOKEN_FAILED: HTTP " + str(e.code) + " " + e.read().decode()[:300])
+    print("TOKEN_FAILED: HTTP " + str(e.code))
     exit(1)
 
 # Readback verify
@@ -86,11 +82,6 @@ if len(final) != 1 or final[0].get("token_sha256") != token_sha:
 # Get delivery contact
 delivery = final[0].get("delivery", {})
 phone = delivery.get("sms_to", "")
-print(f"PHONE_SUFFIX: ****{str(phone)[-4:]}", file=sys.stderr)  # MASKED: repo is PUBLIC
-
 recovery_url = f"{RECOVERY_URL}#order={OID}&token={token}"
-print(f"TOKEN_LAST4: {token[-4:]} URL_LEN: {len(recovery_url)}", file=sys.stderr)  # NEVER print the URL/token; the stdout JSON carries it to token-output.json for the send step
-print(f"TOKEN_SHA: {token_sha}", file=sys.stderr)
-print(f"EXPIRES: {expires.isoformat()}", file=sys.stderr)
 print(json.dumps({"result": "token_created", "order_id": OID, "delivery_mode": delivery.get("mode"),
                   "delivery_phone": phone, "url": recovery_url}))

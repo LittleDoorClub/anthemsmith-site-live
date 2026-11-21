@@ -5,9 +5,9 @@ on:
   workflow_dispatch:
     inputs:
       order_id:
-        description: 'Order id to read (blank = AS-MUIJ11B6, the recovery order)'
+        description: Optional synthetic test order. Leave blank to use the private recovery order.
         required: false
-        default: 'AS-MUIJ11B6'
+        default: ''
 
 permissions:
   contents: read
@@ -23,8 +23,9 @@ jobs:
           python-version: '3.11'
       - name: Read recovery order shape (no writes, no personal data)
         env:
+          TEST_ORDER_ID: ${{ inputs.order_id }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          ORDER_ID: ${{ inputs.order_id }}
+          ANTHEMSMITH_LEGACY_ORDER_ID: ${{ secrets.ANTHEMSMITH_LEGACY_ORDER_ID }}
         run: python scripts/recovery_order_state.py
       - name: Keep evidence
         if: always()
