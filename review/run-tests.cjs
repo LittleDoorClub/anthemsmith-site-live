@@ -15,6 +15,7 @@ if (!jsdom) {
     + '  npm install --prefix C:/Users/Owner/AppData/Local/Temp/as_jsdom_env jsdom');
   process.exit(2);
 }
-const suite = spawnSync(process.execPath, ['--test', path.join(__dirname, 'order-client.test.cjs')],
+const suite = spawnSync(process.execPath, ['--test', path.join(__dirname, 'order-client.test.cjs'),
+  path.join(__dirname, '..', 'tests', 'storefront-production-contract.test.cjs')],
   { stdio: 'inherit', env: { ...process.env, JSDOM_PATH: jsdom } });
 process.exit(suite.status ?? 1);

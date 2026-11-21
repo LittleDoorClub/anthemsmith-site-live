@@ -43,7 +43,7 @@ async function environment({url='https://anthemsmith.com/',stored=null,tabOrder=
  w.eval(fs.readFileSync(path.join(root,'order-client.js'),'utf8'));
  await tick();
  const set=(name,value)=>{const el=w.document.querySelector(`[name="${name}"]`);el.value=value;return el;};
- const fill=()=>{set('instagram1','https://instagram.com/maya/');set('phone','(202) 555-0123');w.document.getElementById('consent_rights').checked=true;};
+ const fill=()=>{w.document.querySelector('[name="voice"][value="Female"]').checked=true;set('genre','Pop');set('instagram1','https://instagram.com/maya/');set('phone','(202) 555-0123');w.document.getElementById('consent_rights').checked=true;};
  const chooseFiles=(lane,count)=>{
   const radio=w.document.querySelector(`[name="intake_lane"][value="${lane}"]`);radio.checked=true;
   w.pickLane({link:0,screenshot:1,photos:2}[lane]);
@@ -57,11 +57,11 @@ async function environment({url='https://anthemsmith.com/',stored=null,tabOrder=
 test('complete brief and delivery are saved before checkout, with no generation call',async()=>{
  const e=await environment();try{
  e.fill();e.chooseFiles('link',2);e.w.document.getElementById('addProfile').click();e.set('instagram2','https://instagram.com/friend/?utm_source=test');
- e.set('laneDetails0','Cake collapsed. Confidence did not.');e.set('details','Birthday in Tampa');e.set('names','Maya and Alex');e.set('referenceUrl','https://youtu.be/reference');e.set('artist','An artist');e.set('song','A song');e.set('genre','Pop');
+ e.set('laneDetails0','Cake collapsed. Confidence did not.');e.set('details','Birthday in Tampa');e.set('names','Maya and Alex');e.set('referenceUrl','https://youtu.be/abcdefghijk');e.set('artist','An artist');e.set('song','A song');e.set('genre','Pop');
  await e.w.submitInstant();
  assert.equal(e.calls.length,2);assert(e.calls[0].url.endsWith('/orders'));assert(e.calls[1].url.endsWith('/checkout'));
  const request=JSON.parse(e.calls[0].init.body.get('request'));
- assert.deepEqual(request.instagram_urls,['https://www.instagram.com/maya/','https://www.instagram.com/friend/']);assert.equal(request.captions,'Cake collapsed. Confidence did not.');assert.equal(request.names,'Maya and Alex');assert.equal(request.reference.genre,'Pop');assert.equal(request.reference.url,'https://youtu.be/reference');assert.equal(request.delivery.address,'+12025550123');assert.equal(request.delivery.method,'sms');assert.equal(request.intake,'link');assert.equal(e.calls[0].init.body.getAll('files').length,2);
+ assert.deepEqual(request.instagram_urls,['https://www.instagram.com/maya/','https://www.instagram.com/friend/']);assert.equal(request.captions,'Cake collapsed. Confidence did not.');assert.equal(request.names,'Maya and Alex');assert.equal(request.reference.genre,'Pop');assert.equal(request.reference.url,'https://www.youtube.com/watch?v=abcdefghijk');assert.equal(request.delivery.address,'+12025550123');assert.equal(request.delivery.method,'sms');assert.equal(request.intake,'link');assert.equal(e.calls[0].init.body.getAll('files').length,2);
  assert.equal(e.calls[1].init.headers.Authorization,'Bearer '+token);assert.equal(e.w.document.querySelector('.checkout-link').target,'');
  const stored=JSON.parse(e.w.localStorage.getItem('anthemsmith_order_v2'));assert.deepEqual(stored,saved);assert.equal(e.w.document.querySelectorAll('#builder').length,1);
  }finally{e.close();}
@@ -332,4 +332,28 @@ for(const status of ['blocked_spec','blocked_profile','needs_reference','needs_s
   assert.equal(brief.querySelector('button,.checkout-link'),null);
   assert.equal(e.calls.length,1);assert.equal(e.timers.size,0);
  } finally {e.close();}
+});
+
+test('the pause is visible before the first price button and above the form; reopened copy follows the same gate',async()=>{
+ for(const paused of [true,false]) {
+  const e=await environment({paused});
+  try {
+   const doc=e.w.document;
+   const top=doc.querySelector('.hero [data-pause-notice]'), heroButton=doc.querySelector('.hero [data-create]');
+   const formNotice=doc.querySelector('#builder [data-pause-notice]');
+   assert.equal(top.hidden,!paused); assert.equal(formNotice.hidden,!paused);
+   assert(top.compareDocumentPosition(heroButton)&e.w.Node.DOCUMENT_POSITION_FOLLOWING);
+   assert(formNotice.compareDocumentPosition(doc.getElementById('songForm'))&e.w.Node.DOCUMENT_POSITION_FOLLOWING);
+   assert.match(heroButton.textContent,paused?/View the \$5 song form/:/Start my song/);
+  } finally {e.close();}
+ }
+});
+
+test('ID-only order help has a working support email link and makes no API call',async()=>{
+ const e=await environment({url:player+'?order='+normalId,paused:true});
+ try{
+  const support=e.w.document.querySelector('#brief a[href="mailto:cozyafllc@gmail.com"]');
+  assert.match(support.textContent,/order ID/);
+  assert.equal(e.calls.length,0);
+ }finally{e.close();}
 });

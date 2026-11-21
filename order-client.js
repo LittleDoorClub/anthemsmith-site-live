@@ -44,6 +44,36 @@
     if (u.protocol !== 'https:' || !['instagram.com','www.instagram.com'].includes(u.hostname) || !match || ['p','reel','reels','stories','explore','accounts'].includes(match[1].toLowerCase())) throw new Error('Paste a complete Instagram profile link.');
     return 'https://www.instagram.com/' + match[1] + '/';
   }
+  function trackUrl(value) {
+    const raw=value.trim();
+    if (!raw) return '';
+    let url;
+    try { url=new URL(raw); } catch (_) {}
+    const message='Paste a YouTube video link or a Spotify track link from open.spotify.com.';
+    if (!url || url.protocol!=='https:' || url.username || url.password || url.port) throw new Error(message);
+    if (url.hostname==='open.spotify.com') {
+      const track=url.pathname.match(/^\/(?:intl-[a-z]{2}\/)?track\/([a-zA-Z0-9]{22})\/?$/);
+      if (track) return 'https://open.spotify.com/track/'+track[1];
+    }
+    const youtube=['www.youtube.com','youtube.com','m.youtube.com','music.youtube.com'];
+    let video;
+    if (url.hostname==='youtu.be') video=url.pathname.replace(/^\/|\/$/g,'');
+    else if (youtube.includes(url.hostname)) {
+      if (url.pathname==='/watch') video=url.searchParams.get('v');
+      else video=url.pathname.match(/^\/(?:embed|shorts)\/([a-zA-Z0-9_-]{11})\/?$/)?.[1];
+    }
+    if (video && /^[a-zA-Z0-9_-]{11}$/.test(video)) return 'https://www.youtube.com/watch?v='+video;
+    throw new Error(message);
+  }
+  function updateSoundFields() {
+    const fields=form.elements;
+    const artist=fields.artist.value.trim(), song=fields.song.value.trim(), url=fields.referenceUrl;
+    fields.genre.required=!url.value.trim() && !artist && !song;
+    fields.artist.required=!url.value.trim() && Boolean(song);
+    fields.song.required=!url.value.trim() && Boolean(artist);
+    try {trackUrl(url.value);url.setCustomValidity('');}
+    catch (error) {url.setCustomValidity(error.message);}
+  }
   function collect() {
     const values = Object.fromEntries(Array.from(new FormData(form)).filter(([,v]) => typeof v === 'string'));
     const lane = values.intake_lane;
@@ -60,8 +90,15 @@
     const contact = delivery === 'sms' ? phoneNumber(values.phone || '') : (values.email || '').trim();
     if (delivery === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact)) throw new Error('Enter a valid email address, or choose text.');
     const profiles = lane === 'link' ? [instagram(values.instagram1 || ''), instagram(values.instagram2 || '')].filter(Boolean) : [];
-    const referenceUrl = (values.referenceUrl || '').trim();
-    if (referenceUrl) safeUrl(referenceUrl,['youtube.com','www.youtube.com','m.youtube.com','music.youtube.com','youtu.be','open.spotify.com','spotify.link']);
+    const reference={url:trackUrl(values.referenceUrl || ''), artist:(values.artist || '').trim(),
+      song:(values.song || '').trim(), genre:values.genre || ''};
+    if (!['Male','Female'].includes(values.voice)) throw new Error('Choose a voice for your song.');
+    if (!reference.url && Boolean(reference.artist)!==Boolean(reference.song)) {
+      throw new Error('Enter both the artist and song title, or clear them and choose a genre.');
+    }
+    if (!reference.genre && !reference.url && !reference.artist) {
+      throw new Error('Choose a genre, paste a song link, or enter both an artist and song title.');
+    }
     // A link-lane order with no usable link is a photo order; never claim 'link' intake with
     // an empty instagram_urls, because production validates the link lane as link-plus-photo.
     const intake = lane === 'link' && !profiles.length ? 'photos' : lane;
@@ -75,7 +112,7 @@
       category:values.category,
       mood:values.mood,
       voice:values.voice,
-      reference:{url:referenceUrl,artist:(values.artist||'').trim(),song:(values.song||'').trim(),genre:values.genre||''},
+      reference,
       delivery:{method:delivery,address:contact},
       consent:true,
       files:files.map(f=>({name:f.name,type:f.type,size:f.size,last_modified:f.lastModified}))
@@ -96,11 +133,21 @@
   // restore()/watch() below still read the private link and show a paid customer their song.
   const PAUSED = window.ANTHEMSMITH_ORDERING_PAUSED !== false;
   const PAUSE_MESSAGE = 'New orders are temporarily paused while we verify uploads and payment. '
-    + 'Already paid? Use the private order link from your confirmation — do not pay again.';
+    + 'Already paid? Open your saved private order link. Do not pay again.';
   if (form) {
+    document.querySelectorAll('[data-pause-notice]').forEach(el=>{el.hidden=!PAUSED;});
+    if (PAUSED) document.querySelectorAll('[data-paused-label]').forEach(el=>{el.textContent=el.dataset.pausedLabel;});
     form.querySelectorAll('[name="delivery"]').forEach(el=>el.addEventListener('change',setDelivery));
     setDelivery();
-    form.addEventListener('input',()=>{feedback.textContent='';});
+    updateSoundFields();
+    form.addEventListener('input',event=>{
+      feedback.textContent='';
+      if (['genre','artist','song','referenceUrl'].includes(event.target.name)) updateSoundFields();
+    });
+    form.addEventListener('invalid',event=>{
+      const details=event.target.closest('details');
+      if (details) details.open=true;
+    },true);
     button.disabled = PAUSED;
     button.textContent = PAUSED ? 'Ordering paused' : 'Continue to secure payment — $5';
     if (PAUSED) feedback.textContent = PAUSE_MESSAGE;
@@ -315,7 +362,9 @@
 
   if (form) window.submitInstant=async function() {
     if(PAUSED){feedback.textContent=PAUSE_MESSAGE;button.disabled=true;return;}
-    if(busy || !form.reportValidity())return;
+    if(busy)return;
+    updateSoundFields();
+    if(!form.reportValidity())return;
     busy=true;button.disabled=true;feedback.textContent='Saving your story…';
     try{
       const {request,files}=collect();
@@ -379,7 +428,11 @@
     if (validOrder(order)) watch(order);
     else if (!form || addressed || hash.has('order') || hash.has('token') || hash.has('access')) {
       brief.hidden=false;
-      brief.textContent='An order ID alone cannot open your song. Open the complete private order link from your confirmation, or return in the same tab you used for checkout. If you need help, message @AnthemSmith with your order ID. You do not need to pay again.';
+      brief.textContent='An order ID alone cannot open your song. Open the complete private order link you saved or received, or return to the original checkout tab. You do not need to pay again. ';
+      const support=document.createElement('a');
+      support.href='mailto:cozyafllc@gmail.com';
+      support.textContent='Email AnthemSmith with your order ID for help.';
+      brief.append(support);
     }
   }
   restore();
